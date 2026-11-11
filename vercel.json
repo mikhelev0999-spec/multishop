@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "case \"$CONVEX_DEPLOY_KEY\" in prod:*) npx convex deploy --cmd 'npm run build';; *) npm run build;; esac",
+  "outputDirectory": "dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}

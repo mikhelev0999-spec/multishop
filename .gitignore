@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-ssr
+*.local
+*.log
+.DS_Store
+.vercel
+.playwright-mcp
+.env
+.env.*
+!.env.example
