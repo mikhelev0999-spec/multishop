@@ -3,7 +3,7 @@ import { parsePrice, summarize, usdToUah } from "./pricing";
 
 describe("summarize", () => {
   test("empty list", () => {
-    expect(summarize([])).toEqual({ count: 0 });
+    expect(summarize([])).toBeNull();
   });
 
   test("quartiles and median of a clean list", () => {

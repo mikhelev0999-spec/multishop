@@ -10,6 +10,8 @@
 
 import type * as fx from "../fx.js";
 import type * as health from "../health.js";
+import type * as lib_agent from "../lib/agent.js";
+import type * as lib_claude from "../lib/claude.js";
 import type * as lib_ebay from "../lib/ebay.js";
 import type * as lib_nbu from "../lib/nbu.js";
 import type * as lib_pricing from "../lib/pricing.js";
@@ -26,6 +28,8 @@ import type {
 declare const fullApi: ApiFromModules<{
   fx: typeof fx;
   health: typeof health;
+  "lib/agent": typeof lib_agent;
+  "lib/claude": typeof lib_claude;
   "lib/ebay": typeof lib_ebay;
   "lib/nbu": typeof lib_nbu;
   "lib/pricing": typeof lib_pricing;

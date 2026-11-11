@@ -1,6 +1,9 @@
-export type PriceSummary =
-  | { count: 0 }
-  | { count: number; p25: number; median: number; p75: number };
+export interface PriceSummary {
+  count: number;
+  p25: number;
+  median: number;
+  p75: number;
+}
 
 function quantile(sorted: number[], q: number): number {
   const pos = (sorted.length - 1) * q;
@@ -12,9 +15,9 @@ function quantile(sorted: number[], q: number): number {
 const round2 = (x: number) => Math.round(x * 100) / 100;
 
 /** Quartiles of comparable prices after dropping outliers beyond 1.5×IQR. */
-export function summarize(prices: number[]): PriceSummary {
+export function summarize(prices: number[]): PriceSummary | null {
   const sorted = prices.filter((p) => Number.isFinite(p) && p > 0).sort((a, b) => a - b);
-  if (sorted.length === 0) return { count: 0 };
+  if (sorted.length === 0) return null;
   const q1 = quantile(sorted, 0.25);
   const q3 = quantile(sorted, 0.75);
   const iqr = q3 - q1;
