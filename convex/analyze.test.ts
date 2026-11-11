@@ -107,3 +107,34 @@ test("an error marks the item failed and tells the owner", async () => {
     "Не получилось разобрать: Claude отказался обрабатывать эти фото\nПришлите фото ещё раз.",
   );
 });
+
+test("a question is stored and shown in place of the 'working' message", async () => {
+  const t = convexTest(schema, modules);
+  const itemId = await collectingItem(t);
+  vi.mocked(runAgent).mockResolvedValue({ kind: "question", question: "Он включается?", costUsd: 0.03 });
+  await t.action(internal.analyze.start, { itemId, photoAt: 100 });
+  const item = await t.run((ctx) => ctx.db.get(itemId));
+  expect(item).toMatchObject({ status: "needs_input", question: "Он включается?", costUsd: 0.03 });
+  expect(tg.editMessageText).toHaveBeenCalledWith(1, 777, "❓ Он включается?");
+});
+
+test("if even the 'working' message fails, the item is failed, not stuck in analyzing", async () => {
+  const t = convexTest(schema, modules);
+  const itemId = await collectingItem(t);
+  vi.mocked(tg.sendMessage).mockRejectedValueOnce(new Error("Too Many Requests"));
+  await t.action(internal.analyze.start, { itemId, photoAt: 100 });
+  const item = await t.run((ctx) => ctx.db.get(itemId));
+  expect(item?.status).toBe("failed");
+  expect(runAgent).not.toHaveBeenCalled();
+});
+
+test("a draft that Telegram refuses to show stays a draft", async () => {
+  const t = convexTest(schema, modules);
+  const itemId = await collectingItem(t);
+  vi.mocked(runAgent).mockResolvedValue({ kind: "draft", draft, comparables: [], costUsd: 0 });
+  vi.mocked(tg.editMessageText).mockRejectedValueOnce(new Error("Bad Request: message is too long"));
+  await t.action(internal.analyze.start, { itemId, photoAt: 100 });
+  const item = await t.run((ctx) => ctx.db.get(itemId));
+  expect(item?.status).toBe("draft");
+  expect(vi.mocked(tg.editMessageText).mock.calls[1][2]).toContain("Черновик готов, но Telegram не принял");
+});

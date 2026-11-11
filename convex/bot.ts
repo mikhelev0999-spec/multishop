@@ -1,6 +1,7 @@
 // Outgoing Telegram messages, scheduled from mutations (mutations can't call the network).
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
+import { splitMessage } from "./lib/draftMessage";
 import * as telegram from "./lib/telegramApi";
 
 const keyboardValidator = v.array(v.array(v.object({ text: v.string(), callbackData: v.string() })));
@@ -9,7 +10,10 @@ export const send = internalAction({
   args: { chatId: v.number(), text: v.string(), keyboard: v.optional(keyboardValidator) },
   returns: v.null(),
   handler: async (_ctx, { chatId, text, keyboard }) => {
-    await telegram.sendMessage(chatId, text, keyboard);
+    const parts = splitMessage(text);
+    for (const [i, part] of parts.entries()) {
+      await telegram.sendMessage(chatId, part, i === parts.length - 1 ? keyboard : undefined);
+    }
     return null;
   },
 });

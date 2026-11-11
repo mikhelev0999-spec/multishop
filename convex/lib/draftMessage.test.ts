@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { copyText, draftKeyboard, formatDraft, MAX_MESSAGE_LENGTH } from "./draftMessage";
+import { copyText, draftKeyboard, formatDraft, MAX_MESSAGE_LENGTH, splitMessage } from "./draftMessage";
 import type { Draft } from "./validators";
 
 const draft: Draft = {
@@ -62,4 +62,22 @@ test("copy text is title, price and description", () => {
   expect(copyText(draft)).toBe(
     "Навушники Sony WH-1000XM4\n\n4500 грн\n\nБ/в, повний комплект.\n\nКатегорія: Електроніка / Навушники",
   );
+});
+
+test("long reasoning and defects still fit", () => {
+  const text = formatDraft(
+    { ...draft, priceReasoningRu: "п".repeat(3000), defects: Array(10).fill("д".repeat(150)) },
+    0,
+  );
+  expect(text.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+});
+
+test("splitMessage keeps short text whole and cuts long text at line breaks", () => {
+  expect(splitMessage("short")).toEqual(["short"]);
+  const long = `${"а".repeat(3000)}\n${"б".repeat(3000)}`;
+  expect(splitMessage(long)).toEqual(["а".repeat(3000), "б".repeat(3000)]);
+  const solid = "в".repeat(9000);
+  const parts = splitMessage(solid);
+  expect(parts.every((p) => p.length <= MAX_MESSAGE_LENGTH)).toBe(true);
+  expect(parts.join("")).toBe(solid);
 });

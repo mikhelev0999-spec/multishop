@@ -22,6 +22,7 @@ export default defineSchema({
     draftMessageId: v.optional(v.number()),
     statusMessageId: v.optional(v.number()),
     photoLimitNotified: v.optional(v.boolean()),
+    analysisRun: v.optional(v.number()),
     costUsd: v.number(),
     error: v.optional(v.string()),
   })

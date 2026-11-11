@@ -187,6 +187,43 @@ describe("runAgent", () => {
   });
 });
 
+describe("limits", () => {
+  test("after 3 answers ask_owner is not offered", async () => {
+    const { deps, createMessage } = setup([reply([toolUse("t", "submit_draft", draftInput)])]);
+    const answers = [1, 2, 3].map((i) => ({ question: `q${i}`, answer: `a${i}` }));
+    await runAgent({ ...input, answers }, deps);
+    const names = createMessage.mock.calls[0][0].tools?.map((t) => (t as { name: string }).name);
+    expect(names).not.toContain("ask_owner");
+  });
+
+  test("a call to a tool that was not offered is an error", async () => {
+    const { deps, createMessage } = setup([
+      reply([toolUse("q", "ask_owner", { question: "?" })]),
+      reply([toolUse("t", "submit_draft", draftInput)]),
+    ]);
+    const r = await runRewrite({ draft: expectedDraft, instruction: "x" }, deps);
+    expect(r.draft.titleUk).toBe(expectedDraft.titleUk);
+    const res = (createMessage.mock.calls[1][0].messages[2].content as Anthropic.Beta.BetaToolResultBlockParam[])[0];
+    expect(res).toMatchObject({ tool_use_id: "q", is_error: true });
+  });
+
+  test("a too long description is sent back for fixing", async () => {
+    const { deps, createMessage } = setup([
+      reply([toolUse("bad", "submit_draft", { ...draftInput, description_uk: "а".repeat(3001) })]),
+      reply([toolUse("t", "submit_draft", draftInput)]),
+    ]);
+    await runAgent(input, deps);
+    const res = (createMessage.mock.calls[1][0].messages[2].content as Anthropic.Beta.BetaToolResultBlockParam[])[0];
+    expect(JSON.stringify(res.content)).toContain("3000");
+  });
+
+  test("photos are cached across loop steps", async () => {
+    const { deps, createMessage } = setup([reply([toolUse("t", "submit_draft", draftInput)])]);
+    await runAgent(input, deps);
+    expect(createMessage.mock.calls[0][0].cache_control).toEqual({ type: "ephemeral" });
+  });
+});
+
 describe("runRewrite", () => {
   test("offers only submit_draft and keeps the price", async () => {
     const { deps, createMessage } = setup([

@@ -6,6 +6,7 @@ let client: Anthropic | null = null;
 
 export const createMessage: CreateMessage = (params) => {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not set");
-  client ??= new Anthropic();
+  // Short per-request timeout: the whole analysis must fit in one Convex action (10 min).
+  client ??= new Anthropic({ timeout: 120_000, maxRetries: 1 });
   return client.beta.messages.create(params);
 };

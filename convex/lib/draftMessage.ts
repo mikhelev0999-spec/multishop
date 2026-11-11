@@ -28,10 +28,26 @@ export function formatDraft(d: Draft, costUsd: number): string {
   ].join("\n");
   const marketplaces = d.marketplaces.map((m) => MARKETPLACE_NAME[m]).join(", ");
   const tail = `\n\nПлощадки: ${marketplaces} · анализ: $${costUsd.toFixed(2)}`;
-  const room = MAX_MESSAGE_LENGTH - head.length - tail.length - 1;
-  const body =
-    d.descriptionUk.length > room ? `${d.descriptionUk.slice(0, room - 1)}…` : d.descriptionUk;
-  return `${head}\n${body}${tail}`;
+  const room = Math.max(0, MAX_MESSAGE_LENGTH - head.length - tail.length - 1);
+  const body = cut(d.descriptionUk, room);
+  return cut(`${head}\n${body}${tail}`, MAX_MESSAGE_LENGTH);
+}
+
+const cut = (text: string, max: number) =>
+  text.length <= max ? text : max <= 0 ? "" : `${text.slice(0, max - 1)}…`;
+
+/** Splits a long text into Telegram-sized parts, preferring line breaks. */
+export function splitMessage(text: string, max = MAX_MESSAGE_LENGTH): string[] {
+  const parts: string[] = [];
+  let rest = text;
+  while (rest.length > max) {
+    const breakAt = rest.lastIndexOf("\n", max);
+    const end = breakAt > max / 2 ? breakAt : max;
+    parts.push(rest.slice(0, end));
+    rest = rest.slice(end).replace(/^\n/, "");
+  }
+  if (rest) parts.push(rest);
+  return parts;
 }
 
 export function draftKeyboard(itemId: string): Keyboard {

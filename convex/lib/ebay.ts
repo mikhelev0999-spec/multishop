@@ -3,7 +3,6 @@ import type { Comparable } from "./validators";
 
 const API = "https://api.ebay.com";
 const MARKETPLACE = "EBAY_US";
-const USED_CONDITION_ID = 3000;
 
 let cached: { token: string; expiresAt: number } | null = null;
 
@@ -37,14 +36,21 @@ async function appToken(): Promise<string> {
 }
 
 async function browse(path: string, init: RequestInit = {}): Promise<Comparable[]> {
-  const res = await fetch(`${API}/buy/browse/v1${path}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${await appToken()}`,
-      "x-ebay-c-marketplace-id": MARKETPLACE,
-      "content-type": "application/json",
-    },
-  });
+  const request = async () =>
+    fetch(`${API}/buy/browse/v1${path}`, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${await appToken()}`,
+        "x-ebay-c-marketplace-id": MARKETPLACE,
+        "content-type": "application/json",
+      },
+    });
+  let res = await request();
+  if (res.status === 401) {
+    // Token revoked before its expiry: get a new one and retry once.
+    cached = null;
+    res = await request();
+  }
   if (!res.ok) throw new Error(`eBay search failed: HTTP ${res.status}`);
   return parseSummaries(await res.json());
 }
@@ -74,7 +80,8 @@ function parseSummaries(json: unknown): Comparable[] {
 
 export async function searchByKeywords(query: string, opts: { used: boolean }): Promise<Comparable[]> {
   const filter = ["buyingOptions:{FIXED_PRICE}"];
-  if (opts.used) filter.push(`conditionIds:{${USED_CONDITION_ID}}`);
+  // All used grades (Used, Pre-owned Excellent/Good/…), not just condition id 3000.
+  if (opts.used) filter.push("conditions:{USED}");
   const params = new URLSearchParams({ q: query, limit: "30", filter: filter.join(",") });
   return browse(`/item_summary/search?${params}`);
 }

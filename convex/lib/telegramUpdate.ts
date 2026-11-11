@@ -10,8 +10,20 @@ interface Base {
   chatId: number;
 }
 
+/** Formats Claude accepts; HEIC and other files must be sent as a compressed photo. */
+export const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
+/** Claude takes up to 5 MB per image after base64; stay well below. */
+export const MAX_DOCUMENT_BYTES = 3_500_000;
+
 export type Incoming =
-  | (Base & { kind: "photo"; fileId: string; mediaGroupId?: string; caption?: string })
+  | (Base & {
+      kind: "photo";
+      fileId: string;
+      mimeType?: string;
+      mediaGroupId?: string;
+      caption?: string;
+    })
+  | (Base & { kind: "unsupported_file" })
   | (Base & { kind: "text"; text: string })
   | (Base & { kind: "command"; command: Command })
   | (Base & {
@@ -58,7 +70,12 @@ function parseMessage(updateId: number, m: Obj): Incoming | null {
   if (isObj(m.document)) {
     const fileId = str(m.document.file_id);
     const mime = str(m.document.mime_type) ?? "";
-    return fileId && mime.startsWith("image/") ? { kind: "photo", ...base, fileId, ...extras } : null;
+    const size = num(m.document.file_size) ?? 0;
+    if (!fileId) return null;
+    if (!(IMAGE_MIME_TYPES as readonly string[]).includes(mime) || size > MAX_DOCUMENT_BYTES) {
+      return { kind: "unsupported_file", ...base };
+    }
+    return { kind: "photo", ...base, fileId, mimeType: mime, ...extras };
   }
   const text = str(m.text)?.trim();
   if (!text) return null;

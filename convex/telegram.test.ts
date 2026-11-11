@@ -309,3 +309,107 @@ describe("owner replies", () => {
     expect(all.find((i) => i._id === second)?.awaiting).toBe("price");
   });
 });
+
+describe("review fixes", () => {
+  test("a new item drops a forgotten price request, so the answer goes to the new question", async () => {
+    const t = convexTest(schema, modules);
+    const a = await draftItem(t);
+    await deliver(t, button("price", a));
+    vi.mocked(runAgent).mockResolvedValueOnce({ kind: "question", question: "Сколько памяти?", costUsd: 0 });
+    await deliver(t, photo("b"));
+    await deliver(t, text("64"));
+    const all = await items(t);
+    expect(all.find((i) => i._id === a)?.draft?.priceUah).toBe(4500);
+    expect(all.find((i) => i._id === a)?.awaiting).toBeUndefined();
+    const b = all.find((i) => i._id !== a)!;
+    expect(b.answers).toEqual([{ question: "Сколько памяти?", answer: "64" }]);
+  });
+
+  test("a new item cancels an unanswered question about an older one", async () => {
+    const t = convexTest(schema, modules);
+    vi.mocked(runAgent).mockResolvedValueOnce({ kind: "question", question: "Размер?", costUsd: 0 });
+    await deliver(t, photo("shirt"));
+    await deliver(t, photo("kettle"));
+    const statuses = (await items(t)).map((i) => i.status).sort();
+    expect(statuses).toEqual(["cancelled", "draft"]);
+  });
+
+  test("an unsupported file gets an explanation", async () => {
+    const t = convexTest(schema, modules);
+    await deliver(t, msg({ document: { file_id: "f", mime_type: "image/heic", file_size: 100 } }));
+    expect(await items(t)).toHaveLength(0);
+    expect(sentTexts()[0]).toContain("Пришлите снимок как обычное фото");
+  });
+
+  test("a hint sent right after the photo becomes part of the caption", async () => {
+    const t = convexTest(schema, modules);
+    await deliver(t, photo("p", { caption: "торг" }), text("не работает кнопка"));
+    expect(vi.mocked(runAgent).mock.calls[0][0].caption).toBe("торг\nне работает кнопка");
+  });
+
+  test("a dollar price on an OLX-only draft is refused", async () => {
+    const t = convexTest(schema, modules);
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      kind: "draft",
+      draft: { ...draft, marketplaces: ["olx"] },
+      comparables: [],
+      costUsd: 0,
+    });
+    const id = await draftItem(t);
+    await deliver(t, button("price", id), text("$40"));
+    expect(sentTexts().at(-1)).toContain("только для OLX");
+    expect((await items(t))[0].draft?.priceUsd).toBe(110);
+  });
+
+  test("a long text to paste is sent in parts", async () => {
+    const t = convexTest(schema, modules);
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      kind: "draft",
+      draft: { ...draft, descriptionUk: `${"а".repeat(2500)}\n${"б".repeat(2500)}` },
+      comparables: [],
+      costUsd: 0,
+    });
+    const id = await draftItem(t);
+    await deliver(t, button("publish", id));
+    const parts = sentTexts();
+    expect(parts.length).toBe(2);
+    expect(parts.every((p) => p.length <= 4096)).toBe(true);
+  });
+
+  test("a price changed during a rewrite survives it", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    vi.mocked(runRewrite).mockImplementationOnce(async () => {
+      await t.run(async (ctx) => {
+        const item = await ctx.db.get(id);
+        await ctx.db.patch(id, { draft: { ...item!.draft!, priceUah: 3333 } });
+      });
+      return { draft: { ...draft, descriptionUk: "Новий текст." }, costUsd: 0 };
+    });
+    await deliver(t, button("text", id), text("короче"));
+    const [item] = await items(t);
+    expect(item.draft).toMatchObject({ descriptionUk: "Новий текст.", priceUah: 3333 });
+  });
+
+  test("the watchdog fails an analysis that never reported back, but not a newer run", async () => {
+    const t = convexTest(schema, modules);
+    const id = await t.run((ctx) =>
+      ctx.db.insert("items", {
+        chatId: CHAT,
+        status: "analyzing",
+        photoIds: [],
+        lastPhotoAt: 0,
+        answers: [],
+        costUsd: 0,
+        analysisRun: 2,
+      }),
+    );
+    await t.mutation(internal.items.watchdog, { itemId: id, run: 1 });
+    expect((await items(t))[0].status).toBe("analyzing");
+    await t.mutation(internal.items.watchdog, { itemId: id, run: 2 });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect((await items(t))[0].status).toBe("failed");
+    expect(sentTexts()).toContain("Разбор занял слишком много времени и прервался. Пришлите фото ещё раз.");
+  });
+});
+

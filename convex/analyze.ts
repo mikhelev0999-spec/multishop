@@ -18,11 +18,13 @@ export const start = internalAction({
     const job = await ctx.runMutation(internal.items.beginAnalysis, { itemId, photoAt });
     if (!job) return null;
 
-    const n = job.photoIds.length;
-    const statusId = await telegram.sendMessage(job.chatId, `Разбираюсь… (фото: ${n})`);
-    await ctx.runMutation(internal.items.setStatusMessage, { itemId, messageId: statusId });
-
+    let statusId: number | undefined;
+    // Once the outcome is stored, a failure to show it must not turn the item into "failed".
+    let saved = false;
     try {
+      statusId = await telegram.sendMessage(job.chatId, `Разбираюсь… (фото: ${job.photoIds.length})`);
+      await ctx.runMutation(internal.items.setStatusMessage, { itemId, messageId: statusId });
+
       const photos = await Promise.all(
         job.photoIds.map(async (id) => {
           const blob = await ctx.storage.get(id);
@@ -39,6 +41,7 @@ export const start = internalAction({
           question: result.question,
           costUsd: result.costUsd,
         });
+        saved = true;
         await telegram.editMessageText(job.chatId, statusId, `❓ ${result.question}`);
         return null;
       }
@@ -48,16 +51,20 @@ export const start = internalAction({
         comparables: result.comparables,
         costUsd: result.costUsd,
       });
+      saved = true;
       await showDraft(ctx, itemId);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      console.error("analysis failed", itemId, message);
-      await ctx.runMutation(internal.items.markFailed, { itemId, error: message });
-      await telegram.editMessageText(
-        job.chatId,
-        statusId,
-        `Не получилось разобрать: ${message}\nПришлите фото ещё раз.`,
-      );
+      console.error(saved ? "showing result failed" : "analysis failed", itemId, message);
+      if (!saved) await ctx.runMutation(internal.items.markFailed, { itemId, error: message });
+      const text = saved
+        ? `Черновик готов, но Telegram не принял сообщение: ${message}`
+        : `Не получилось разобрать: ${message}\nПришлите фото ещё раз.`;
+      // Best effort: if Telegram itself is down, the owner can't be told anything.
+      await (statusId === undefined
+        ? telegram.sendMessage(job.chatId, text)
+        : telegram.editMessageText(job.chatId, statusId, text)
+      ).catch((err) => console.error("could not report", err));
     }
     return null;
   },

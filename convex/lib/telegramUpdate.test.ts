@@ -39,17 +39,26 @@ describe("parseUpdate", () => {
   test("image sent as a document counts as a photo", () => {
     const r = parseUpdate({
       update_id: 3,
-      message: { message_id: 12, from, chat, document: { file_id: "doc", mime_type: "image/jpeg" } },
+      message: {
+        message_id: 12,
+        from,
+        chat,
+        document: { file_id: "doc", mime_type: "image/png", file_size: 900_000 },
+      },
     });
-    expect(r).toMatchObject({ kind: "photo", fileId: "doc" });
+    expect(r).toMatchObject({ kind: "photo", fileId: "doc", mimeType: "image/png" });
   });
 
-  test("non-image document is ignored", () => {
+  test.each([
+    ["application/pdf", 1000],
+    ["image/heic", 1000],
+    ["image/jpeg", 8_000_000],
+  ])("document %s of %d bytes is unsupported", (mime_type, file_size) => {
     const r = parseUpdate({
       update_id: 4,
-      message: { message_id: 13, from, chat, document: { file_id: "pdf", mime_type: "application/pdf" } },
+      message: { message_id: 13, from, chat, document: { file_id: "f", mime_type, file_size } },
     });
-    expect(r).toEqual({ kind: "ignored", updateId: 4 });
+    expect(r).toEqual({ kind: "unsupported_file", updateId: 4, fromId: 42, chatId: 4242 });
   });
 
   test("plain text", () => {

@@ -43,7 +43,7 @@ test("searchByKeywords gets a token, filters used fixed-price items and parses U
   const u = new URL(String(url));
   expect(u.pathname).toBe("/buy/browse/v1/item_summary/search");
   expect(u.searchParams.get("q")).toBe("sony wh-1000xm4");
-  expect(u.searchParams.get("filter")).toBe("buyingOptions:{FIXED_PRICE},conditionIds:{3000}");
+  expect(u.searchParams.get("filter")).toBe("buyingOptions:{FIXED_PRICE},conditions:{USED}");
   expect((init as RequestInit).headers).toMatchObject({
     authorization: "Bearer T",
     "x-ebay-c-marketplace-id": "EBAY_US",
@@ -79,6 +79,17 @@ test("searchByImage posts the base64 image", async () => {
 test("empty result is an empty list", async () => {
   fetchMock.mockResolvedValueOnce(token()).mockResolvedValueOnce(json({ total: 0 }));
   expect(await searchByKeywords("nothing", { used: true })).toEqual([]);
+});
+
+test("a revoked token is refreshed once", async () => {
+  fetchMock
+    .mockResolvedValueOnce(token())
+    .mockResolvedValueOnce(json({}, 401))
+    .mockResolvedValueOnce(json({ access_token: "T2", expires_in: 7200 }))
+    .mockResolvedValueOnce(results());
+  const items = await searchByKeywords("x", { used: true });
+  expect(items).toHaveLength(1);
+  expect((fetchMock.mock.calls[3][1] as RequestInit).headers).toMatchObject({ authorization: "Bearer T2" });
 });
 
 test("rejected credentials give an actionable error", async () => {

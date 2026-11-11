@@ -33,6 +33,13 @@ export interface Photo {
 
 export const MODEL = "claude-opus-5-5";
 export const MAX_REQUESTS = 8;
+/** Convex actions die after 10 minutes; stop well before that. */
+export const LOOP_BUDGET_MS = 6 * 60 * 1000;
+/** After this many answered questions the agent must decide on its own. */
+export const MAX_QUESTIONS = 3;
+export const MAX_DESCRIPTION_LENGTH = 3000;
+export const MAX_REASONING_LENGTH = 600;
+export const MAX_QUESTION_LENGTH = 300;
 const MAX_LISTED_RESULTS = 15;
 
 // USD per 1M tokens for claude-opus-5-5.
@@ -53,8 +60,9 @@ Your job:
 3. Pick a price for a reasonably quick sale on OLX.ua in UAH, and a price in USD for eBay.
 4. Call submit_draft. The title and description are in Ukrainian, written like a good private
    OLX listing: a clear title (max ${MAX_TITLE_LENGTH} characters, brand and model first), then a short,
-   honest description with condition, defects and what is included. No emojis, no hype,
-   no contact details. price_reasoning_ru is in Russian for the owner: two or three sentences
+   honest description (at most ${MAX_DESCRIPTION_LENGTH} characters) with condition, defects and what
+   is included. No emojis, no hype,
+   no contact details. price_reasoning_ru is in Russian for the owner: two or three short sentences
    on the comparables and why this price.
    Suggest eBay only when it makes sense to ship abroad (small, light, valuable items).
 
@@ -141,7 +149,10 @@ const SEARCH_EBAY_BY_IMAGE: Tool = {
   } as unknown as Tool["input_schema"],
 };
 
-const NUDGE = "Finish now: call submit_draft, or ask_owner if you really need an answer.";
+const nudge = (tools: Tool[]) =>
+  tools.some((t) => t.name === "ask_owner")
+    ? "Finish now: call submit_draft, or ask_owner if you really need an answer."
+    : "Finish now: call submit_draft.";
 
 export type AgentResult =
   | { kind: "draft"; draft: Draft; comparables: Comparable[]; costUsd: number }
@@ -154,6 +165,8 @@ export async function runAgent(
   const notes: string[] = [`Photos: ${input.photos.length}. Today's NBU rate: 1 USD = ${input.usdUah} UAH.`];
   if (input.caption) notes.push(`Owner's note: ${input.caption}`);
   for (const a of input.answers) notes.push(`You asked: ${a.question}\nOwner answered: ${a.answer}`);
+  const canAsk = input.answers.length < MAX_QUESTIONS;
+  if (!canAsk) notes.push("You have asked enough questions: decide on your own and call submit_draft.");
 
   const comparables = new Map<string, Comparable>();
   const runSearch = async (found: Promise<Comparable[]>) => {
@@ -164,7 +177,7 @@ export async function runAgent(
 
   return loop(
     [{ role: "user", content: [...photoBlocks(input.photos), { type: "text", text: notes.join("\n\n") }] }],
-    [SEARCH_EBAY, SEARCH_EBAY_BY_IMAGE, ASK_OWNER, SUBMIT_DRAFT],
+    canAsk ? [SEARCH_EBAY, SEARCH_EBAY_BY_IMAGE, ASK_OWNER, SUBMIT_DRAFT] : [SEARCH_EBAY, SEARCH_EBAY_BY_IMAGE, SUBMIT_DRAFT],
     deps,
     {
       search_ebay: (raw) => {
@@ -193,6 +206,7 @@ export async function runRewrite(
     JSON.stringify(toToolInput(input.draft)),
     `The owner asks to change it (in Russian): ${input.instruction}`,
     "Apply the change and call submit_draft with the full updated draft. Keep the prices unchanged.",
+    "No searching or questions this time: submit_draft is the only tool available.",
   ].join("\n\n");
   const result = await loop(
     [{ role: "user", content: [{ type: "text", text }] }],
@@ -218,11 +232,16 @@ async function loop(
   onDraft: (draft: Draft, costUsd: number) => AgentResult,
 ): Promise<AgentResult> {
   let costUsd = 0;
+  const allowed = new Set(tools.map((t) => t.name));
+  const deadline = Date.now() + LOOP_BUDGET_MS;
   for (let i = 0; i < MAX_REQUESTS; i++) {
+    if (Date.now() > deadline) throw new Error("Claude думал слишком долго");
     const response = await deps.createMessage({
       model: MODEL,
       max_tokens: 16000,
-      system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
+      // Automatic caching: the photos are re-sent on every step of the loop.
+      cache_control: { type: "ephemeral" },
+      system: SYSTEM,
       messages: [...messages],
       tools,
       tool_choice: { type: "auto" },
@@ -241,18 +260,20 @@ async function loop(
       (b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use",
     );
     if (calls.length === 0) {
-      messages.push({ role: "user", content: [{ type: "text", text: NUDGE }] });
+      messages.push({ role: "user", content: [{ type: "text", text: nudge(tools) }] });
       continue;
     }
 
     const results: ToolResult[] = [];
     for (const call of calls) {
-      if (call.name === "ask_owner") {
+      if (!allowed.has(call.name)) {
+        results.push(error(call.id, `tool ${call.name} is not available`));
+      } else if (call.name === "ask_owner") {
         const question = (call.input as { question?: unknown }).question;
-        if (typeof question === "string" && question.trim()) {
+        if (typeof question === "string" && question.trim() && question.length <= MAX_QUESTION_LENGTH) {
           return { kind: "question", question: question.trim(), costUsd };
         }
-        results.push(error(call.id, "question is required"));
+        results.push(error(call.id, `question must be 1–${MAX_QUESTION_LENGTH} characters`));
       } else if (call.name === "submit_draft") {
         const parsed = parseDraft(call.input);
         if (parsed.ok) return onDraft(parsed.draft, costUsd);
@@ -325,6 +346,12 @@ export function parseDraft(raw: unknown): Parsed {
   if (!title) problems.push("title_uk is empty");
   if (title.length > MAX_TITLE_LENGTH) problems.push(`title_uk must be at most ${MAX_TITLE_LENGTH} characters, got ${title.length}`);
   if (!description) problems.push("description_uk is empty");
+  if (description.length > MAX_DESCRIPTION_LENGTH) {
+    problems.push(`description_uk must be at most ${MAX_DESCRIPTION_LENGTH} characters, got ${description.length}`);
+  }
+  if (str("price_reasoning_ru").length > MAX_REASONING_LENGTH) {
+    problems.push(`price_reasoning_ru must be at most ${MAX_REASONING_LENGTH} characters`);
+  }
   const condition = r.condition as Condition;
   if (!CONDITIONS.includes(condition)) problems.push("condition is invalid");
   const priceUah = Number(r.price_uah);
@@ -348,7 +375,12 @@ export function parseDraft(raw: unknown): Parsed {
       ...(brand ? { brand } : {}),
       ...(model ? { model } : {}),
       condition,
-      defects: Array.isArray(r.defects) ? r.defects.filter((d): d is string => typeof d === "string" && d.trim() !== "") : [],
+      defects: Array.isArray(r.defects)
+        ? r.defects
+            .filter((d): d is string => typeof d === "string" && d.trim() !== "")
+            .slice(0, 10)
+            .map((d) => d.trim().slice(0, 150))
+        : [],
       priceUah: Math.round(priceUah),
       priceUsd: Math.round(priceUsd * 100) / 100,
       priceReasoningRu: str("price_reasoning_ru"),

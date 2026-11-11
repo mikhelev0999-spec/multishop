@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import { copyText } from "./lib/draftMessage";
+import { clearAwaiting } from "./lib/itemState";
 import { parsePrice } from "./lib/pricing";
 import * as telegramApi from "./lib/telegramApi";
 import { parseUpdate, type CallbackAction, type Incoming } from "./lib/telegramUpdate";
@@ -16,6 +17,8 @@ export const HELP_TEXT = [
 ].join("\n");
 
 const NOTHING_TO_DO = "Пришлите фото вещи, чтобы начать.";
+const UNSUPPORTED_FILE =
+  "Этот файл не подойдёт. Пришлите снимок как обычное фото (не файлом) — или файлом JPEG/PNG до 3,5 МБ.";
 const PRICE_PROMPT = "Напишите новую цену: «1500» — для OLX в гривнах, «$40» — для eBay.";
 const TEXT_PROMPT = "Что поменять в тексте? Например: «добавь, что есть коробка».";
 
@@ -45,12 +48,17 @@ export const handleUpdate = internalMutation({
         await ctx.scheduler.runAfter(0, internal.telegram.storePhoto, {
           chatId: incoming.chatId,
           fileId: incoming.fileId,
+          receivedAt: Date.now(),
+          ...(incoming.mimeType ? { mimeType: incoming.mimeType } : {}),
           ...(incoming.mediaGroupId ? { mediaGroupId: incoming.mediaGroupId } : {}),
           ...(incoming.caption ? { caption: incoming.caption } : {}),
         });
         break;
       case "command":
         await send(ctx, incoming.chatId, HELP_TEXT);
+        break;
+      case "unsupported_file":
+        await send(ctx, incoming.chatId, UNSUPPORTED_FILE);
         break;
       case "text":
         await handleText(ctx, incoming.chatId, incoming.text);
@@ -67,21 +75,46 @@ export const storePhoto = internalAction({
   args: {
     chatId: v.number(),
     fileId: v.string(),
+    receivedAt: v.number(),
+    mimeType: v.optional(v.string()),
     mediaGroupId: v.optional(v.string()),
     caption: v.optional(v.string()),
   },
   returns: v.null(),
-  handler: async (ctx, { chatId, fileId, mediaGroupId, caption }) => {
+  handler: async (ctx, { chatId, fileId, receivedAt, mimeType, mediaGroupId, caption }) => {
     let storageId: Id<"_storage">;
     try {
       const file = await telegramApi.getFileBytes(fileId);
-      storageId = await ctx.storage.store(new Blob([file.bytes], { type: file.mimeType }));
+      storageId = await ctx.storage.store(new Blob([file.bytes], { type: mimeType ?? file.mimeType }));
     } catch (e) {
       console.error("photo download failed", e);
       await telegramApi.sendMessage(chatId, "Не удалось скачать фото из Telegram. Пришлите его ещё раз.");
       return null;
     }
-    await ctx.runMutation(internal.items.attachPhoto, { chatId, storageId, mediaGroupId, caption });
+    await ctx.runMutation(internal.items.attachPhoto, {
+      chatId,
+      storageId,
+      receivedAt,
+      mediaGroupId,
+      caption,
+    });
+    return null;
+  },
+});
+
+const UPDATE_RETENTION_MS = 2 * 24 * 60 * 60 * 1000;
+
+export const pruneUpdates = internalMutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const cutoff = Date.now() - UPDATE_RETENTION_MS;
+    const old = await ctx.db
+      .query("telegramUpdates")
+      .withIndex("by_creation_time", (q) => q.lt("_creationTime", cutoff))
+      .take(500);
+    for (const row of old) await ctx.db.delete(row._id);
+    if (old.length === 500) await ctx.scheduler.runAfter(0, internal.telegram.pruneUpdates, {});
     return null;
   },
 });
@@ -125,6 +158,10 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
       await send(ctx, chatId, NOTHING_TO_DO);
       return;
     }
+    if ("usd" in price && !priceItem.draft.marketplaces.includes("ebay")) {
+      await send(ctx, chatId, "Этот черновик только для OLX — напишите цену в гривнах, например 1500.");
+      return;
+    }
     const draft =
       "uah" in price
         ? { ...priceItem.draft, priceUah: Math.round(price.uah) }
@@ -159,6 +196,18 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
       itemId: waiting._id,
       photoAt: waiting.lastPhotoAt,
     });
+    return;
+  }
+
+  const collecting = await latestWithStatus(ctx, "collecting");
+  if (collecting) {
+    // A hint sent right after the photos: treat it like a caption.
+    const caption = collecting.caption ? `${collecting.caption}\n${text}` : text;
+    await ctx.db.patch(collecting._id, { caption });
+    return;
+  }
+  if (await latestWithStatus(ctx, "analyzing")) {
+    await send(ctx, chatId, "Уже разбираю фото — подождите немного.");
     return;
   }
 
@@ -214,12 +263,14 @@ async function removeButtons(ctx: MutationCtx, item: Doc<"items">) {
 
 /** Only one item waits for a reply at a time: a new request replaces the old one. */
 async function setAwaiting(ctx: MutationCtx, itemId: Id<"items">, awaiting: "price" | "text") {
-  for (const kind of ["price", "text"] as const) {
-    const others = await ctx.db
-      .query("items")
-      .withIndex("by_awaiting", (q) => q.eq("awaiting", kind))
-      .take(10);
-    for (const other of others) await ctx.db.patch(other._id, { awaiting: undefined });
-  }
+  await clearAwaiting(ctx, itemId);
   await ctx.db.patch(itemId, { awaiting });
+}
+
+function latestWithStatus(ctx: MutationCtx, status: "collecting" | "analyzing") {
+  return ctx.db
+    .query("items")
+    .withIndex("by_status", (q) => q.eq("status", status))
+    .order("desc")
+    .first();
 }
