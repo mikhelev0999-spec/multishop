@@ -8,7 +8,13 @@
  * @module
  */
 
+import type * as fx from "../fx.js";
 import type * as health from "../health.js";
+import type * as lib_ebay from "../lib/ebay.js";
+import type * as lib_nbu from "../lib/nbu.js";
+import type * as lib_pricing from "../lib/pricing.js";
+import type * as lib_telegramApi from "../lib/telegramApi.js";
+import type * as lib_telegramUpdate from "../lib/telegramUpdate.js";
 import type * as lib_validators from "../lib/validators.js";
 
 import type {
@@ -18,7 +24,13 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  fx: typeof fx;
   health: typeof health;
+  "lib/ebay": typeof lib_ebay;
+  "lib/nbu": typeof lib_nbu;
+  "lib/pricing": typeof lib_pricing;
+  "lib/telegramApi": typeof lib_telegramApi;
+  "lib/telegramUpdate": typeof lib_telegramUpdate;
   "lib/validators": typeof lib_validators;
 }>;
 
