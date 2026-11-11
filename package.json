@@ -12,9 +12,11 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "typecheck": "tsc -b && tsc -p convex/tsconfig.json --noEmit"
+    "typecheck": "tsc -b && tsc -p convex/tsconfig.json --noEmit",
+    "codegen:offline": "node scripts/gen-convex-api.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@tailwindcss/vite": "^4.3.3",
     "convex": "^1.46.0",
     "react": "^19.2.8",

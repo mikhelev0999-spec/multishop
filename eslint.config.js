@@ -17,4 +17,22 @@ export default defineConfig([
     ],
     languageOptions: { globals: globals.browser },
   },
+  {
+    files: ["convex/**/*.ts"],
+    ignores: ["convex/_generated/**", "convex/**/*.test.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.property.name='filter'][callee.object.callee.property.name=/^(query|withIndex|order)$/]",
+          message: "Фильтруй индексом: .withIndex(...), а не .filter() по полю.",
+        },
+        {
+          selector: "CallExpression[callee.property.name='collect']",
+          message: ".collect() на растущей таблице читает её целиком. Используй .take(n) или .paginate().",
+        },
+      ],
+    },
+  },
 ]);
