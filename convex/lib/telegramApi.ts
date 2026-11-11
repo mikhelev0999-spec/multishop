@@ -59,6 +59,15 @@ export async function editMessageText(
   });
 }
 
+/** Removes the inline buttons and keeps the text. */
+export async function removeKeyboard(chatId: number, messageId: number): Promise<void> {
+  await call("editMessageReplyMarkup", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: { inline_keyboard: [] },
+  });
+}
+
 export async function answerCallbackQuery(callbackId: string, text?: string): Promise<void> {
   await call("answerCallbackQuery", { callback_query_id: callbackId, ...(text ? { text } : {}) });
 }

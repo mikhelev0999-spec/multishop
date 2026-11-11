@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
 import { fetchUsdUah, kyivDate } from "./lib/nbu";
 
 export const cachedRate = internalQuery({
@@ -30,20 +30,22 @@ export const saveRate = internalMutation({
 });
 
 /** Today's USD→UAH rate, fetched from NBU at most once per Kyiv day. */
+export async function getUsdUah(ctx: ActionCtx): Promise<number> {
+  const date = kyivDate(Date.now());
+  const cached = await ctx.runQuery(internal.fx.cachedRate, { date });
+  if (cached.today !== null) return cached.today;
+  try {
+    const rate = await fetchUsdUah();
+    await ctx.runMutation(internal.fx.saveRate, { date, usdUah: rate });
+    return rate;
+  } catch (error) {
+    if (cached.latest !== null) return cached.latest;
+    throw error;
+  }
+}
+
 export const usdUah = internalAction({
   args: {},
   returns: v.number(),
-  handler: async (ctx): Promise<number> => {
-    const date = kyivDate(Date.now());
-    const cached = await ctx.runQuery(internal.fx.cachedRate, { date });
-    if (cached.today !== null) return cached.today;
-    try {
-      const rate = await fetchUsdUah();
-      await ctx.runMutation(internal.fx.saveRate, { date, usdUah: rate });
-      return rate;
-    } catch (error) {
-      if (cached.latest !== null) return cached.latest;
-      throw error;
-    }
-  },
+  handler: (ctx): Promise<number> => getUsdUah(ctx),
 });

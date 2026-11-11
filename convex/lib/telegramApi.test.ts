@@ -3,6 +3,7 @@ import {
   answerCallbackQuery,
   editMessageText,
   getFileBytes,
+  removeKeyboard,
   sendMessage,
   setWebhook,
 } from "./telegramApi";
@@ -48,6 +49,15 @@ test("editMessageText with no keyboard removes buttons", async () => {
     message_id: 7,
     text: "new",
     reply_markup: { inline_keyboard: [] },
+  });
+});
+
+test("removeKeyboard keeps the text and drops buttons", async () => {
+  fetchMock.mockResolvedValueOnce(ok(true));
+  await removeKeyboard(1, 7);
+  expect(lastCall()).toEqual({
+    url: "https://api.telegram.org/botTOKEN/editMessageReplyMarkup",
+    body: { chat_id: 1, message_id: 7, reply_markup: { inline_keyboard: [] } },
   });
 });
 
