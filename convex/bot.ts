@@ -8,6 +8,7 @@ import * as telegram from "./lib/telegramApi";
 const buttonValidator = v.union(
   v.object({ text: v.string(), callbackData: v.string() }),
   v.object({ text: v.string(), webAppUrl: v.string() }),
+  v.object({ text: v.string(), url: v.string() }),
 );
 const keyboardValidator = v.array(v.array(buttonValidator));
 

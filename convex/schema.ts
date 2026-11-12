@@ -5,6 +5,7 @@ import {
   awaitingValidator,
   draftValidator,
   itemStatusValidator,
+  providerValidator,
 } from "./lib/validators";
 
 export default defineSchema({
@@ -64,4 +65,22 @@ export default defineSchema({
     .index("by_storage", ["storageId"]),
   telegramUpdates: defineTable({ updateId: v.number() }).index("by_update_id", ["updateId"]),
   fxRates: defineTable({ date: v.string(), usdUah: v.number() }).index("by_date", ["date"]),
+  /** One-time OAuth "state" values of login links sent by the bot (accounts.ts). */
+  oauthStates: defineTable({
+    state: v.string(),
+    provider: providerValidator,
+    chatId: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_state", ["state"])
+    .index("by_created", ["createdAt"]),
+  /** Connected marketplace accounts: one row per provider. Tokens never leave Convex. */
+  accounts: defineTable({
+    provider: providerValidator,
+    accessToken: v.string(),
+    refreshToken: v.optional(v.string()),
+    accessExpiresAt: v.number(),
+    refreshExpiresAt: v.optional(v.number()),
+    connectedAt: v.number(),
+  }).index("by_provider", ["provider"]),
 });

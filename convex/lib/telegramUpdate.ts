@@ -16,7 +16,7 @@ export const CALLBACK_ACTIONS = [
 ] as const;
 export type CallbackAction = (typeof CALLBACK_ACTIONS)[number];
 
-export const COMMANDS = ["start", "help", "items", "stats", "new"] as const;
+export const COMMANDS = ["start", "help", "items", "stats", "new", "accounts"] as const;
 export type Command = (typeof COMMANDS)[number];
 
 interface Base {

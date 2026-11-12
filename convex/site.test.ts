@@ -62,3 +62,22 @@ test("site files are not pruned as orphans", async () => {
   await t.mutation(internal.files.pruneOrphans, {});
   expect(await t.run(async (ctx) => (await ctx.storage.get(id)) !== null)).toBe(true);
 });
+
+test("the privacy page and the eBay declined page are plain HTML", async () => {
+  const t = convexTest(schema, modules);
+  const privacy = await t.fetch("/privacy", { method: "GET" });
+  expect(privacy.status).toBe(200);
+  expect(privacy.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  expect(await privacy.text()).toContain("Privacy Policy");
+  const declined = await t.fetch("/oauth/ebay/declined", { method: "GET" });
+  expect(await declined.text()).toContain("eBay не подключён");
+});
+
+test("a callback with an unknown state is refused with a page", async () => {
+  vi.stubEnv("CONVEX_SITE_URL", "https://demo.convex.site");
+  const t = convexTest(schema, modules);
+  const res = await t.fetch("/oauth/olx/callback?state=nope&code=C", { method: "GET" });
+  expect(res.status).toBe(400);
+  expect(await res.text()).toContain("Ссылка устарела");
+  vi.unstubAllEnvs();
+});

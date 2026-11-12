@@ -1,8 +1,11 @@
 // The only place that talks to the Telegram Bot API. Mocked in tests.
 import { MENU_LAYOUT } from "./menu";
 
-/** A callback button, or a button that opens a Mini App page. */
-export type Button = { text: string; callbackData: string } | { text: string; webAppUrl: string };
+/** A callback button, a button that opens a Mini App page, or a plain link. */
+export type Button =
+  | { text: string; callbackData: string }
+  | { text: string; webAppUrl: string }
+  | { text: string; url: string };
 export type Keyboard = Button[][];
 
 function token(): string {
@@ -46,7 +49,9 @@ const markup = (keyboard: Keyboard) => ({
     row.map((b) =>
       "webAppUrl" in b
         ? { text: b.text, web_app: { url: b.webAppUrl } }
-        : { text: b.text, callback_data: b.callbackData },
+        : "url" in b
+          ? { text: b.text, url: b.url }
+          : { text: b.text, callback_data: b.callbackData },
     ),
   ),
 });

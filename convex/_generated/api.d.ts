@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as accounts from "../accounts.js";
 import type * as analyze from "../analyze.js";
 import type * as bot from "../bot.js";
 import type * as crons from "../crons.js";
@@ -26,6 +27,8 @@ import type * as lib_itemState from "../lib/itemState.js";
 import type * as lib_menu from "../lib/menu.js";
 import type * as lib_mode from "../lib/mode.js";
 import type * as lib_nbu from "../lib/nbu.js";
+import type * as lib_oauth from "../lib/oauth.js";
+import type * as lib_pages from "../lib/pages.js";
 import type * as lib_pricing from "../lib/pricing.js";
 import type * as lib_progress from "../lib/progress.js";
 import type * as lib_showDraft from "../lib/showDraft.js";
@@ -46,6 +49,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accounts: typeof accounts;
   analyze: typeof analyze;
   bot: typeof bot;
   crons: typeof crons;
@@ -64,6 +68,8 @@ declare const fullApi: ApiFromModules<{
   "lib/menu": typeof lib_menu;
   "lib/mode": typeof lib_mode;
   "lib/nbu": typeof lib_nbu;
+  "lib/oauth": typeof lib_oauth;
+  "lib/pages": typeof lib_pages;
   "lib/pricing": typeof lib_pricing;
   "lib/progress": typeof lib_progress;
   "lib/showDraft": typeof lib_showDraft;

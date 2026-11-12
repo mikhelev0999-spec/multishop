@@ -1,6 +1,8 @@
 import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
 import { httpAction, type ActionCtx } from "./_generated/server";
+import { messagePage, privacyPage } from "./lib/pages";
+import type { Provider } from "./lib/oauth";
 
 const http = httpRouter();
 
@@ -50,6 +52,49 @@ http.route({
   method: "GET",
   handler: httpAction((ctx, request) =>
     serve(ctx, new URL(request.url).pathname.slice(1), "public, max-age=31536000, immutable"),
+  ),
+});
+
+const html = (body: string, status = 200) =>
+  new Response(body, {
+    status,
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+  });
+
+http.route({
+  path: "/privacy",
+  method: "GET",
+  handler: httpAction(async () => html(privacyPage())),
+});
+
+// Where OLX and eBay send the owner back after the login page (accounts.ts).
+for (const provider of ["olx", "ebay"] as Provider[]) {
+  http.route({
+    path: `/oauth/${provider}/callback`,
+    method: "GET",
+    handler: httpAction(async (ctx, request) => {
+      const q = new URL(request.url).searchParams;
+      const opt = (key: string) => {
+        const value = q.get(key);
+        return value ? { [key]: value.slice(0, 2048) } : {};
+      };
+      const result = await ctx.runAction(internal.accounts.complete, {
+        provider,
+        ...opt("state"),
+        ...opt("code"),
+        ...opt("error"),
+      });
+      return html(messagePage(result.title, result.text), result.ok ? 200 : 400);
+    }),
+  });
+}
+
+// eBay's "declined" URL: it is opened without a state when the owner presses "No thanks".
+http.route({
+  path: "/oauth/ebay/declined",
+  method: "GET",
+  handler: httpAction(async () =>
+    html(messagePage("Подключение отменено", "eBay не подключён. Вернитесь в Telegram.")),
   ),
 });
 

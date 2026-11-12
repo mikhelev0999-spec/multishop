@@ -74,6 +74,14 @@ test("a web app button opens a page", async () => {
   });
 });
 
+test("a link button opens a URL", async () => {
+  fetchMock.mockResolvedValueOnce(ok({ message_id: 8 }));
+  await sendMessage(1, "x", [[{ text: "OLX", url: "https://www.olx.ua/oauth/authorize/?a=1" }]]);
+  expect(lastCall().body.reply_markup).toEqual({
+    inline_keyboard: [[{ text: "OLX", url: "https://www.olx.ua/oauth/authorize/?a=1" }]],
+  });
+});
+
 test("sendMediaGroup sends an album, a single photo with sendPhoto, nothing for none", async () => {
   fetchMock.mockImplementation(async () => ok(true));
   await sendMediaGroup(1, ["https://a/1", "https://a/2"]);
@@ -152,7 +160,8 @@ test("menu option shows the persistent reply keyboard", async () => {
   expect(lastCall().body.reply_markup).toEqual({
     keyboard: [
       [{ text: "📸 Новая вещь" }, { text: "📦 Мои вещи" }],
-      [{ text: "📊 Статистика" }, { text: "❓ Помощь" }],
+      [{ text: "📊 Статистика" }, { text: "🔗 Аккаунты" }],
+      [{ text: "❓ Помощь" }],
     ],
     resize_keyboard: true,
     is_persistent: true,

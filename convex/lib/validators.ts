@@ -60,3 +60,11 @@ export const comparableValidator = v.object({
   condition: v.optional(v.string()),
 });
 export type Comparable = Infer<typeof comparableValidator>;
+
+export const providerValidator = v.union(v.literal("olx"), v.literal("ebay"));
+export const tokensValidator = v.object({
+  accessToken: v.string(),
+  refreshToken: v.optional(v.string()),
+  accessExpiresAt: v.number(),
+  refreshExpiresAt: v.optional(v.number()),
+});

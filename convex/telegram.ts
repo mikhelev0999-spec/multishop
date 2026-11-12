@@ -212,6 +212,10 @@ async function handleCommand(ctx: MutationCtx, chatId: number, command: Command)
       await clearAwaiting(ctx);
       await send(ctx, chatId, statsText(await collectStats(ctx)), { html: true });
       return;
+    case "accounts":
+      await clearAwaiting(ctx);
+      await ctx.scheduler.runAfter(0, internal.accounts.show, { chatId });
+      return;
   }
 }
 

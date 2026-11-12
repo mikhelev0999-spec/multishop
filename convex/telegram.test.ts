@@ -489,6 +489,14 @@ describe("menu and items", () => {
   });
 });
 
+test("«🔗 Аккаунты» shows the marketplace accounts", async () => {
+  vi.stubEnv("CONVEX_SITE_URL", "https://demo.convex.site");
+  const t = convexTest(schema, modules);
+  await deliver(t, msg({ text: "🔗 Аккаунты" }));
+  expect(sentTexts()[0]).toContain("Аккаунты площадок");
+  expect(sentTexts()[0]).toContain("eBay");
+});
+
 const prButton = (id: string, target: number) => {
   const b = button("pr", id);
   return { ...b, callback_query: { ...b.callback_query, data: `pr:${id}:${target}` } };

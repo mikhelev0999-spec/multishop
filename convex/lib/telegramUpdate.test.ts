@@ -66,7 +66,7 @@ describe("parseUpdate", () => {
     expect(r).toEqual({ kind: "text", updateId: 5, fromId: 42, chatId: 4242, text: "1500" });
   });
 
-  test.each(["start", "help", "items", "stats"] as const)("/%s command", (command) => {
+  test.each(["start", "help", "items", "stats", "accounts"] as const)("/%s command", (command) => {
     const r = parseUpdate({ update_id: 6, message: { message_id: 15, from, chat, text: `/${command}` } });
     expect(r).toEqual({ kind: "command", updateId: 6, fromId: 42, chatId: 4242, command });
   });
@@ -102,6 +102,7 @@ describe("parseUpdate", () => {
     ["📦 Мои вещи", "items"],
     ["📸 Новая вещь", "new"],
     ["📊 Статистика", "stats"],
+    ["🔗 Аккаунты", "accounts"],
     ["❓ Помощь", "help"],
   ] as const)("menu button %s is the %s command", (text, command) => {
     const r = parseUpdate({ update_id: 6, message: { message_id: 15, from, chat, text } });
