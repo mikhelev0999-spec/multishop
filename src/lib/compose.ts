@@ -20,13 +20,16 @@ export async function composeOnBackground(cutout: Blob, background: string): Pro
   const scale = Math.min(1, WORK_MAX / Math.max(bitmap.width, bitmap.height));
   const w = Math.max(1, Math.round(bitmap.width * scale));
   const h = Math.max(1, Math.round(bitmap.height * scale));
-  const [, workCtx] = canvas(w, h);
+  const [work, workCtx] = canvas(w, h);
   workCtx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
 
   const full = workCtx.getImageData(0, 0, w, h);
   const box = alphaBounds(full.data, w, h);
-  if (!box) throw new Error("Не нашёл вещь на фото — попробуйте другой снимок");
+  if (!box) {
+    work.width = work.height = 0;
+    throw new Error("Не нашёл вещь на фото — попробуйте другой снимок");
+  }
 
   const object = workCtx.getImageData(box.x, box.y, box.w, box.h);
   autoLevels(object.data);
@@ -34,6 +37,8 @@ export async function composeOnBackground(cutout: Blob, background: string): Pro
   objCtx.putImageData(new ImageData(sharpen(object.data, box.w, box.h, 0.3), box.w, box.h), 0, 0);
 
   const [out, outCtx] = canvas(OUTPUT_SIZE, OUTPUT_SIZE);
+  // iOS caps total canvas memory; release working canvases as soon as they are done.
+  const release = (...cs: HTMLCanvasElement[]) => cs.forEach((c) => ((c.width = 0), (c.height = 0)));
   outCtx.fillStyle = background;
   outCtx.fillRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
   const place = fitBox(box.w, box.h, OUTPUT_SIZE, PADDING);
@@ -42,7 +47,13 @@ export async function composeOnBackground(cutout: Blob, background: string): Pro
   outCtx.shadowOffsetY = 12;
   outCtx.drawImage(objCanvas, place.x, place.y, place.w, place.h);
 
+  release(work, objCanvas);
+
   return new Promise((resolve, reject) =>
-    out.toBlob((b) => (b ? resolve(b) : reject(new Error("Не удалось сохранить картинку"))), "image/jpeg", 0.9),
+    out.toBlob((b) => {
+      release(out);
+      if (b) resolve(b);
+      else reject(new Error("Не удалось сохранить картинку"));
+    }, "image/jpeg", 0.9),
   );
 }

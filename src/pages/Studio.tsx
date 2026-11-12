@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { composeOnBackground } from "../lib/compose";
 import { removeBackground } from "../lib/removeBackground";
@@ -11,6 +11,9 @@ const BACKGROUNDS = [
   { name: "Бежевый", color: "#efe6da" },
   { name: "Чёрный", color: "#111111" },
 ];
+const MAX_PHOTOS = 10;
+/** The colour picker fires on every move; recompose once it settles. */
+const RECOMPOSE_DELAY_MS = 300;
 
 interface Result {
   originalUrl: string;
@@ -22,6 +25,7 @@ interface Result {
 type Phase = "loading" | "ready" | "working" | "processed" | "saving" | "saved";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const revoke = (results: Result[]) => results.forEach((r) => URL.revokeObjectURL(r.previewUrl));
 
 export default function Studio() {
   const [params] = useSearchParams();
@@ -30,11 +34,22 @@ export default function Studio() {
 
   const [item, setItem] = useState<StudioItem | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set([0]));
+  const [keep, setKeep] = useState<Set<string>>(new Set());
   const [background, setBackground] = useState(BACKGROUNDS[0].color);
   const [results, setResults] = useState<Result[]>([]);
   const [phase, setPhase] = useState<Phase>("loading");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+
+  // Latest values for async work, so a slow recompose never wins over a newer choice.
+  const resultsRef = useRef<Result[]>([]);
+  const generation = useRef(0);
+  const composedWith = useRef(BACKGROUNDS[0].color);
+
+  useEffect(() => {
+    resultsRef.current = results;
+  }, [results]);
+  useEffect(() => () => revoke(resultsRef.current), []);
 
   useEffect(() => {
     if (!initData || !itemId) return;
@@ -42,25 +57,59 @@ export default function Studio() {
     loadItem(initData, itemId)
       .then((loaded) => {
         setItem(loaded);
+        setKeep(new Set(loaded.studio.map((p) => p.storageId)));
         setPhase("ready");
       })
       .catch((e) => setError(message(e)));
   }, [initData, itemId]);
 
-  useEffect(
-    () => () => results.forEach((r) => URL.revokeObjectURL(r.previewUrl)),
-    [results],
-  );
+  // Re-colour already processed photos when the background changes, reusing the cut-outs.
+  useEffect(() => {
+    if (phase !== "processed" || background === composedWith.current) return;
+    const gen = ++generation.current;
+    const timer = setTimeout(async () => {
+      const made: Result[] = [];
+      try {
+        for (const r of resultsRef.current) {
+          const output = await composeOnBackground(r.cutout, background);
+          made.push({ ...r, output, previewUrl: URL.createObjectURL(output) });
+        }
+      } catch (e) {
+        revoke(made);
+        if (gen === generation.current) setError(message(e));
+        return;
+      }
+      if (gen !== generation.current) {
+        revoke(made);
+        return;
+      }
+      revoke(resultsRef.current);
+      composedWith.current = background;
+      setResults(made);
+    }, RECOMPOSE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [background, phase]);
 
   if (!initData || !itemId) {
-    return <Shell><p>Откройте эту страницу из бота в Telegram — кнопкой «🎨 Обработать фото».</p></Shell>;
+    return (
+      <Shell>
+        <p>Откройте эту страницу из бота в Telegram — кнопкой «🎨 Обработать фото».</p>
+      </Shell>
+    );
   }
 
-  const toggle = (i: number) =>
+  const toggleSelected = (i: number) =>
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(i)) next.delete(i);
       else next.add(i);
+      return next;
+    });
+  const toggleKeep = (id: string) =>
+    setKeep((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
 
@@ -85,10 +134,12 @@ export default function Studio() {
         const output = await composeOnBackground(cutout, background);
         out.push({ originalUrl: photo.url, cutout, output, previewUrl: URL.createObjectURL(output) });
       }
+      revoke(resultsRef.current);
+      composedWith.current = background;
       setResults(out);
       setPhase("processed");
     } catch (e) {
-      out.forEach((r) => URL.revokeObjectURL(r.previewUrl));
+      revoke(out);
       setError(message(e));
       setPhase("ready");
     } finally {
@@ -96,23 +147,7 @@ export default function Studio() {
     }
   }
 
-  async function changeBackground(color: string) {
-    setBackground(color);
-    if (phase !== "processed") return;
-    setPhase("working");
-    try {
-      const next: Result[] = [];
-      for (const r of results) {
-        const output = await composeOnBackground(r.cutout, color);
-        next.push({ ...r, output, previewUrl: URL.createObjectURL(output) });
-      }
-      setResults(next);
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setPhase("processed");
-    }
-  }
+  const total = keep.size + results.length;
 
   async function save() {
     setError("");
@@ -122,6 +157,7 @@ export default function Studio() {
         initData,
         itemId,
         results.map((r) => r.output),
+        [...keep],
       );
       setPhase("saved");
       setTimeout(closeMiniApp, 1500);
@@ -132,6 +168,7 @@ export default function Studio() {
   }
 
   const busy = phase === "working" || phase === "saving";
+  const showResults = phase === "processed" || phase === "saving" || phase === "saved";
 
   return (
     <Shell>
@@ -151,10 +188,13 @@ export default function Studio() {
                 type="button"
                 disabled={busy}
                 aria-pressed={background === b.color}
-                onClick={() => changeBackground(b.color)}
+                onClick={() => setBackground(b.color)}
                 className={`rounded border px-3 py-1 text-sm ${background === b.color ? "ring-2 ring-blue-500" : ""}`}
               >
-                <span className="mr-1 inline-block h-3 w-3 rounded-full border align-middle" style={{ background: b.color }} />
+                <span
+                  className="mr-1 inline-block h-3 w-3 rounded-full border align-middle"
+                  style={{ background: b.color }}
+                />
                 {b.name}
               </button>
             ))}
@@ -164,23 +204,55 @@ export default function Studio() {
                 type="color"
                 value={background}
                 disabled={busy}
-                onChange={(e) => changeBackground(e.target.value)}
+                onChange={(e) => setBackground(e.target.value)}
               />
             </label>
           </section>
 
-          {phase !== "processed" && phase !== "saving" && phase !== "saved" && (
+          {item.studio.length > 0 && (
+            <section aria-label="Уже обработаны">
+              <p className="text-sm">Уже обработаны (снимите галочку, чтобы удалить):</p>
+              <ul className="grid grid-cols-4 gap-2">
+                {item.studio.map((p, i) => (
+                  <li key={p.storageId}>
+                    <label className="block text-sm">
+                      <img
+                        src={p.url}
+                        alt={`Обработанное ${i + 1}`}
+                        className="aspect-square w-full rounded object-cover"
+                      />
+                      <input
+                        type="checkbox"
+                        aria-label={`Оставить обработанное ${i + 1}`}
+                        checked={keep.has(p.storageId)}
+                        disabled={busy || phase === "saved"}
+                        onChange={() => toggleKeep(p.storageId)}
+                      />{" "}
+                      оставить
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {!showResults && (
             <>
               <ul className="grid grid-cols-3 gap-2">
                 {item.photos.map((p, i) => (
                   <li key={p.storageId}>
                     <label className="block">
-                      <img src={p.url} alt={`Фото ${i + 1}`} className="aspect-square w-full rounded object-cover" />
+                      <img
+                        src={p.url}
+                        alt={`Фото ${i + 1}`}
+                        className="aspect-square w-full rounded object-cover"
+                      />
                       <input
                         type="checkbox"
+                        aria-label={`Обработать фото ${i + 1}`}
                         checked={selected.has(i)}
                         disabled={busy}
-                        onChange={() => toggle(i)}
+                        onChange={() => toggleSelected(i)}
                         className="mt-1"
                       />{" "}
                       Фото {i + 1}
@@ -205,18 +277,32 @@ export default function Studio() {
 
           {status && <p aria-live="polite">{status}</p>}
 
-          {(phase === "processed" || phase === "saving" || phase === "saved") && (
+          {showResults && (
             <>
               <ul className="space-y-3">
                 {results.map((r, i) => (
                   <li key={r.originalUrl} className="grid grid-cols-2 gap-2">
-                    <img src={r.originalUrl} alt={`До ${i + 1}`} className="aspect-square w-full rounded object-cover" />
-                    <img src={r.previewUrl} alt={`После ${i + 1}`} className="aspect-square w-full rounded object-cover" />
+                    <img
+                      src={r.originalUrl}
+                      alt={`До ${i + 1}`}
+                      className="aspect-square w-full rounded object-cover"
+                    />
+                    <img
+                      src={r.previewUrl}
+                      alt={`После ${i + 1}`}
+                      className="aspect-square w-full rounded object-cover"
+                    />
                   </li>
                 ))}
               </ul>
+              {total > MAX_PHOTOS && (
+                <p className="text-sm text-red-700">
+                  Всего обработанных фото будет {total}, а можно не больше {MAX_PHOTOS} — снимите галочки у
+                  старых.
+                </p>
+              )}
               {phase === "saved" ? (
-                <p className="font-semibold text-green-700">Готово — фото отправлены в чат.</p>
+                <p className="font-semibold text-green-700">Готово — бот пришлёт фото в чат.</p>
               ) : (
                 <div className="flex gap-2">
                   <button
@@ -229,7 +315,7 @@ export default function Studio() {
                   </button>
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || total > MAX_PHOTOS}
                     onClick={save}
                     className="flex-1 rounded bg-blue-600 py-3 font-semibold text-white disabled:opacity-50"
                   >

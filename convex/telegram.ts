@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import { copyText, listingPhotos } from "./lib/draftMessage";
+import { deleteFile } from "./lib/fileOwners";
 import { clearAwaiting } from "./lib/itemState";
 import { isManualMode } from "./lib/mode";
 import { parsePrice } from "./lib/pricing";
@@ -258,7 +259,8 @@ const ACTIONS: Record<
     await send(ctx, item.chatId, TEXT_PROMPT);
   },
   cancel: async (ctx, item) => {
-    await ctx.db.patch(item._id, { status: "cancelled", awaiting: undefined });
+    for (const id of item.studioPhotoIds ?? []) await deleteFile(ctx, id);
+    await ctx.db.patch(item._id, { status: "cancelled", awaiting: undefined, studioPhotoIds: undefined });
     await removeButtons(ctx, item);
     await send(ctx, item.chatId, "Отменено.");
   },

@@ -1,6 +1,7 @@
 // Outgoing Telegram messages, scheduled from mutations (mutations can't call the network).
 import { v } from "convex/values";
-import { internalAction } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { internalAction, type ActionCtx } from "./_generated/server";
 import { splitMessage } from "./lib/draftMessage";
 import * as telegram from "./lib/telegramApi";
 
@@ -49,25 +50,34 @@ export const sendPhotos = internalAction({
   args: { chatId: v.number(), storageIds: v.array(v.id("_storage")) },
   returns: v.null(),
   handler: async (ctx, { chatId, storageIds }) => {
-    const urls = await Promise.all(storageIds.map((id) => ctx.storage.getUrl(id)));
+    await sendAlbum(ctx, chatId, storageIds);
+    return null;
+  },
+});
+
+/** An album fails as a whole if Telegram can't fetch one photo; tell the owner instead of failing silently. */
+async function sendAlbum(ctx: ActionCtx, chatId: number, storageIds: Id<"_storage">[]): Promise<void> {
+  const urls = await Promise.all(storageIds.map((id) => ctx.storage.getUrl(id)));
+  try {
     await telegram.sendMediaGroup(
       chatId,
       urls.filter((u): u is string => u !== null),
     );
-    return null;
-  },
-});
+  } catch (e) {
+    console.error("album failed", e);
+    await telegram.sendMessage(
+      chatId,
+      `Не удалось отправить фото: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
 
 export const sendWithPhotos = internalAction({
   args: { chatId: v.number(), text: v.string(), storageIds: v.array(v.id("_storage")) },
   returns: v.null(),
   handler: async (ctx, { chatId, text, storageIds }) => {
     for (const part of splitMessage(text)) await telegram.sendMessage(chatId, part);
-    const urls = await Promise.all(storageIds.map((id) => ctx.storage.getUrl(id)));
-    await telegram.sendMediaGroup(
-      chatId,
-      urls.filter((u): u is string => u !== null),
-    );
+    await sendAlbum(ctx, chatId, storageIds);
     return null;
   },
 });

@@ -42,6 +42,11 @@ export default defineSchema({
     url: v.string(),
     condition: v.optional(v.string()),
   }).index("by_item", ["itemId"]),
+  storageOwners: defineTable({
+    storageId: v.id("_storage"),
+    itemId: v.id("items"),
+    kind: v.union(v.literal("photo"), v.literal("studio")),
+  }).index("by_storage", ["storageId"]),
   telegramUpdates: defineTable({ updateId: v.number() }).index("by_update_id", ["updateId"]),
   fxRates: defineTable({ date: v.string(), usdUah: v.number() }).index("by_date", ["date"]),
 });

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { looksLikeImage } from "./studio";
+import { looksLikeJpeg } from "./studio";
 import type { Draft } from "./lib/validators";
 
 const modules = import.meta.glob("./**/*.*s");
@@ -69,7 +69,7 @@ const jpeg = () => new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]
 async function draftItem(t: ReturnType<typeof convexTest>, status: "draft" | "approved" = "draft") {
   return t.run(async (ctx) => {
     const photo = await ctx.storage.store(jpeg());
-    return ctx.db.insert("items", {
+    const id = await ctx.db.insert("items", {
       chatId: 4242,
       status,
       photoIds: [photo],
@@ -78,8 +78,13 @@ async function draftItem(t: ReturnType<typeof convexTest>, status: "draft" | "ap
       costUsd: 0,
       draft,
     });
+    await ctx.db.insert("storageOwners", { storageId: photo, itemId: id, kind: "photo" });
+    return id;
   });
 }
+
+const exists = (t: ReturnType<typeof convexTest>, id: Id<"_storage">) =>
+  t.run(async (ctx) => (await ctx.storage.get(id)) !== null);
 
 const store = (t: ReturnType<typeof convexTest>, blob = jpeg()) =>
   t.run((ctx) => ctx.storage.store(blob)) as Promise<Id<"_storage">>;
@@ -140,15 +145,14 @@ describe("flow", () => {
 
     const item = await t.run((ctx) => ctx.db.get(itemId));
     expect(item?.studioPhotoIds).toEqual([second]);
-    expect(await t.run((ctx) => ctx.storage.get(first))).toBeNull();
+    expect(await exists(t, first)).toBe(false);
     expect(tg.sendMediaGroup).toHaveBeenCalledTimes(2);
   });
 
-  test("looksLikeImage checks the file signature", () => {
-    expect(looksLikeImage(new Uint8Array([0xff, 0xd8, 0xff, 0xdb]))).toBe(true);
-    expect(looksLikeImage(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d]))).toBe(true);
-    expect(looksLikeImage(new TextEncoder().encode("RIFF\0\0\0\0WEBP"))).toBe(true);
-    expect(looksLikeImage(new TextEncoder().encode("%PDF-1.7"))).toBe(false);
+  test("looksLikeJpeg checks the file signature", () => {
+    expect(looksLikeJpeg(new Uint8Array([0xff, 0xd8, 0xff, 0xdb]))).toBe(true);
+    expect(looksLikeJpeg(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d]))).toBe(false);
+    expect(looksLikeJpeg(new TextEncoder().encode("%PDF-1.7"))).toBe(false);
   });
 
   test("save refuses non-images and deletes them", async () => {
@@ -157,8 +161,8 @@ describe("flow", () => {
     const pdf = await store(t, new Blob([new Uint8Array(5)], { type: "application/pdf" }));
     await expect(
       t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [pdf] }),
-    ).rejects.toThrow("картинк");
-    expect(await t.run((ctx) => ctx.storage.get(pdf))).toBeNull();
+    ).rejects.toThrow("не JPEG");
+    expect(await exists(t, pdf)).toBe(false);
   });
 });
 
@@ -188,4 +192,107 @@ test("publish sends the text and then the photos, processed first", async () => 
   const item = await t.run((ctx) => ctx.db.get(itemId));
   const processedUrl = await t.run((ctx) => ctx.storage.getUrl(item!.studioPhotoIds![0]));
   expect(urls[0]).toBe(processedUrl);
+});
+
+describe("review fixes", () => {
+  test("an original photo passed to save is refused and NOT deleted", async () => {
+    const t = convexTest(schema, modules);
+    const itemId = await draftItem(t);
+    const original = (await t.run((ctx) => ctx.db.get(itemId)))!.photoIds[0];
+    const fresh = await store(t, new Blob([new Uint8Array([1, 2, 3])]));
+    await expect(
+      t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [original, fresh] }),
+    ).rejects.toThrow("чужой файл");
+    expect(await exists(t, original)).toBe(true);
+    expect(await exists(t, fresh)).toBe(false);
+  });
+
+  test("another item's studio photo is refused", async () => {
+    const t = convexTest(schema, modules);
+    const a = await draftItem(t);
+    const b = await draftItem(t);
+    const photo = await store(t);
+    await t.action(api.studio.save, { initData: await initData(), itemId: a, storageIds: [photo] });
+    await expect(
+      t.action(api.studio.save, { initData: await initData(), itemId: b, storageIds: [photo] }),
+    ).rejects.toThrow("чужой файл");
+    expect((await t.run((ctx) => ctx.db.get(a)))?.studioPhotoIds).toEqual([photo]);
+  });
+
+  test("saving again keeps the processed photos that are passed back", async () => {
+    const t = convexTest(schema, modules);
+    const itemId = await draftItem(t);
+    const first = await store(t);
+    await t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [first] });
+    const second = await store(t);
+    await t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [first, second] });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect((await t.run((ctx) => ctx.db.get(itemId)))?.studioPhotoIds).toEqual([first, second]);
+    expect(await exists(t, first)).toBe(true);
+    // Only the newly added photo is posted the second time.
+    expect(vi.mocked(tg.sendMediaGroup).mock.calls.at(-1)?.[1]).toHaveLength(1);
+  });
+
+  test("an old unowned file is not accepted as a new upload", async () => {
+    const t = convexTest(schema, modules);
+    const itemId = await draftItem(t);
+    const stale = await store(t);
+    vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000);
+    await expect(
+      t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [stale] }),
+    ).rejects.toThrow("чужой файл");
+  });
+
+  test("orphan uploads are pruned after an hour, owned files stay", async () => {
+    const t = convexTest(schema, modules);
+    const itemId = await draftItem(t);
+    const original = (await t.run((ctx) => ctx.db.get(itemId)))!.photoIds[0];
+    const orphan = await store(t);
+    vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000);
+    await t.mutation(internal.files.pruneOrphans, {});
+    expect(await exists(t, orphan)).toBe(false);
+    expect(await exists(t, original)).toBe(true);
+  });
+
+  test("backfill gives owners to files stored before tracking", async () => {
+    const t = convexTest(schema, modules);
+    const itemId = await draftItem(t);
+    await t.run(async (ctx) => {
+      for (const row of await ctx.db.query("storageOwners").collect()) await ctx.db.delete(row._id);
+    });
+    expect(await t.mutation(internal.files.backfillOwners, {})).toBe(1);
+    expect(await t.mutation(internal.files.backfillOwners, {})).toBe(0);
+    const original = (await t.run((ctx) => ctx.db.get(itemId)))!.photoIds[0];
+    vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000);
+    await t.mutation(internal.files.pruneOrphans, {});
+    expect(await exists(t, original)).toBe(true);
+  });
+
+  test("cancel deletes processed photos", async () => {
+    const t = convexTest(schema, modules);
+    const itemId = await draftItem(t);
+    const photo = await store(t);
+    await t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [photo] });
+    await t.mutation(internal.telegram.handleUpdate, {
+      update: {
+        update_id: 901,
+        callback_query: {
+          id: "cb",
+          from: { id: OWNER },
+          data: `cancel:${itemId}`,
+          message: { message_id: 1, chat: { id: 4242 } },
+        },
+      },
+    });
+    expect(await exists(t, photo)).toBe(false);
+  });
+
+  test("a failed album is reported to the owner", async () => {
+    const t = convexTest(schema, modules);
+    const itemId = await draftItem(t);
+    vi.mocked(tg.sendMediaGroup).mockRejectedValueOnce(new Error("WEBPAGE_CURL_FAILED"));
+    await t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [await store(t)] });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(vi.mocked(tg.sendMessage).mock.calls.at(-1)?.[1]).toContain("Не удалось отправить фото");
+  });
 });

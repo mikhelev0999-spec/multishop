@@ -27,14 +27,26 @@ export function loadItem(initData: string, itemId: string): Promise<StudioItem> 
   return convex().action(api.studio.load, { initData, itemId: asItemId(itemId) });
 }
 
-/** Uploads processed photos and attaches them to the item; the bot then posts them to the chat. */
-export async function saveProcessed(initData: string, itemId: string, photos: Blob[]): Promise<void> {
+/**
+ * Uploads new processed photos and sets the item's processed list to `keep` + the new ones;
+ * processed photos not in `keep` are deleted. The bot posts the new ones to the chat.
+ */
+export async function saveProcessed(
+  initData: string,
+  itemId: string,
+  photos: Blob[],
+  keep: string[] = [],
+): Promise<void> {
+  if (photos.length === 0) {
+    await convex().action(api.studio.save, { initData, itemId: asItemId(itemId), storageIds: keep as Id<"_storage">[] });
+    return;
+  }
   const urls = await convex().action(api.studio.uploadUrls, {
     initData,
     itemId: asItemId(itemId),
     count: photos.length,
   });
-  const storageIds: Id<"_storage">[] = [];
+  const storageIds = keep.map((id) => id as Id<"_storage">);
   for (const [i, photo] of photos.entries()) {
     const res = await fetch(urls[i], {
       method: "POST",

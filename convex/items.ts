@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation, internalQuery } from "./_generated/server";
 import schema from "./schema";
+import { claimFile } from "./lib/fileOwners";
 import { cancelOpenQuestions, clearAwaiting } from "./lib/itemState";
 import { answerValidator, comparableValidator, draftValidator } from "./lib/validators";
 
@@ -67,6 +68,7 @@ export const attachPhoto = internalMutation({
     if (group) {
       itemId = group._id;
       photoAt = Math.max(group.lastPhotoAt, receivedAt);
+      await claimFile(ctx, storageId, itemId, "photo");
       await ctx.db.patch(itemId, {
         photoIds: [...group.photoIds, storageId],
         lastPhotoAt: photoAt,
@@ -87,6 +89,7 @@ export const attachPhoto = internalMutation({
         answers: [],
         costUsd: 0,
       });
+      await claimFile(ctx, storageId, itemId, "photo");
     }
     const delay = Math.max(0, ALBUM_QUIET_MS - (Date.now() - photoAt));
     await ctx.scheduler.runAfter(delay, internal.analyze.start, { itemId, photoAt });

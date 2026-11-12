@@ -52,7 +52,8 @@ export function splitMessage(text: string, max = MAX_MESSAGE_LENGTH): string[] {
 }
 
 export function draftKeyboard(itemId: string, studioUrl?: string): Keyboard {
-  const studio: Keyboard = studioUrl
+  // Telegram rejects the whole message if a web_app URL is not https.
+  const studio: Keyboard = studioUrl?.startsWith("https://")
     ? [[{ text: "🎨 Обработать фото", webAppUrl: `${studioUrl.replace(/\/+$/, "")}/studio?item=${itemId}` }]]
     : [];
   return [
@@ -70,9 +71,14 @@ export function draftKeyboard(itemId: string, studioUrl?: string): Keyboard {
 
 export const MAX_LISTING_PHOTOS = 10;
 
-/** Listing order: processed photos first, then the originals; OLX and Telegram albums take 10. */
+/**
+ * Listing order: processed photos first, then the originals; OLX and Telegram albums take 10.
+ * Up to 5 originals always keep their place, so buyers see the real condition.
+ */
 export function listingPhotos<T>(studio: T[], originals: T[]): T[] {
-  return [...studio, ...originals].slice(0, MAX_LISTING_PHOTOS);
+  const studioRoom = MAX_LISTING_PHOTOS - Math.min(originals.length, 5);
+  const chosen = studio.slice(0, studioRoom);
+  return [...chosen, ...originals].slice(0, MAX_LISTING_PHOTOS);
 }
 
 /** Ready to paste into an OLX listing (stage 1 has no automatic publishing). */

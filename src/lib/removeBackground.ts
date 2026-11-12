@@ -3,11 +3,14 @@
 
 export type Progress = (done: number, total: number) => void;
 
-export async function removeBackground(image: Blob, onProgress?: Progress): Promise<Blob> {
+export async function removeBackground(image: Blob, onModelDownload?: Progress): Promise<Blob> {
   const { removeBackground: run } = await import("@imgly/background-removal");
   return run(image, {
     model: "isnet_quint8",
     output: { format: "image/png" },
-    progress: (_key, current, total) => onProgress?.(current, total),
+    // Only "fetch:*" keys are the model download; the rest are compute steps.
+    progress: (key, current, total) => {
+      if (key.startsWith("fetch:")) onModelDownload?.(current, total);
+    },
   });
 }

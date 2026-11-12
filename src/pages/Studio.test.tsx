@@ -80,8 +80,8 @@ test("processes the selected photos on the chosen background and saves them", as
 
   await user.click(screen.getByRole("button", { name: "Сохранить" }));
   await waitFor(() => expect(saveProcessed).toHaveBeenCalled());
-  const [initData, itemId, blobs] = vi.mocked(saveProcessed).mock.calls[0];
-  expect([initData, itemId, blobs.length]).toEqual(["signed", "item1", 2]);
+  const [initData, itemId, blobs, keep] = vi.mocked(saveProcessed).mock.calls[0];
+  expect([initData, itemId, blobs.length, keep]).toEqual(["signed", "item1", 2, []]);
   expect(await screen.findByText(/Готово/)).toBeInTheDocument();
 });
 
@@ -109,4 +109,35 @@ test("a load failure is shown", async () => {
   vi.mocked(loadItem).mockRejectedValueOnce(new Error("Обработать можно только черновик"));
   renderStudio();
   expect(await screen.findByRole("alert")).toHaveTextContent("только черновик");
+});
+
+test("earlier processed photos are shown and kept unless unticked", async () => {
+  const user = userEvent.setup();
+  vi.mocked(loadItem).mockResolvedValueOnce({
+    ...item,
+    studio: [
+      { storageId: "p1", url: "https://cdn/p1.jpg" },
+      { storageId: "p2", url: "https://cdn/p2.jpg" },
+    ],
+  });
+  renderStudio();
+  await screen.findByText(/Уже обработаны/);
+  await user.click(screen.getByRole("checkbox", { name: "Оставить обработанное 1" }));
+  await user.click(screen.getByRole("button", { name: "Обработать" }));
+  await user.click(await screen.findByRole("button", { name: "Сохранить" }));
+  await waitFor(() => expect(saveProcessed).toHaveBeenCalled());
+  expect(vi.mocked(saveProcessed).mock.calls[0][3]).toEqual(["p2"]);
+});
+
+test("more than 10 processed photos in total blocks saving", async () => {
+  const user = userEvent.setup();
+  vi.mocked(loadItem).mockResolvedValueOnce({
+    ...item,
+    studio: Array.from({ length: 10 }, (_, i) => ({ storageId: `p${i}`, url: `https://cdn/p${i}.jpg` })),
+  });
+  renderStudio();
+  await screen.findByText(/Уже обработаны/);
+  await user.click(screen.getByRole("button", { name: "Обработать" }));
+  expect(await screen.findByRole("button", { name: "Сохранить" })).toBeDisabled();
+  expect(screen.getByText(/можно не больше 10/)).toBeInTheDocument();
 });

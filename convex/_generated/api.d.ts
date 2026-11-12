@@ -11,6 +11,7 @@
 import type * as analyze from "../analyze.js";
 import type * as bot from "../bot.js";
 import type * as crons from "../crons.js";
+import type * as files from "../files.js";
 import type * as fx from "../fx.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
@@ -19,6 +20,7 @@ import type * as lib_agent from "../lib/agent.js";
 import type * as lib_claude from "../lib/claude.js";
 import type * as lib_draftMessage from "../lib/draftMessage.js";
 import type * as lib_ebay from "../lib/ebay.js";
+import type * as lib_fileOwners from "../lib/fileOwners.js";
 import type * as lib_itemState from "../lib/itemState.js";
 import type * as lib_mode from "../lib/mode.js";
 import type * as lib_nbu from "../lib/nbu.js";
@@ -42,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   analyze: typeof analyze;
   bot: typeof bot;
   crons: typeof crons;
+  files: typeof files;
   fx: typeof fx;
   health: typeof health;
   http: typeof http;
@@ -50,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   "lib/claude": typeof lib_claude;
   "lib/draftMessage": typeof lib_draftMessage;
   "lib/ebay": typeof lib_ebay;
+  "lib/fileOwners": typeof lib_fileOwners;
   "lib/itemState": typeof lib_itemState;
   "lib/mode": typeof lib_mode;
   "lib/nbu": typeof lib_nbu;

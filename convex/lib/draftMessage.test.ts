@@ -89,6 +89,10 @@ test("splitMessage keeps short text whole and cuts long text at line breaks", ()
   expect(parts.join("")).toBe(solid);
 });
 
+test("a non-https studio URL adds no button", () => {
+  expect(draftKeyboard("abc", "http://localhost:5173")).toHaveLength(2);
+});
+
 test("with a studio URL the keyboard gets a Mini App button", () => {
   const kb = draftKeyboard("abc", "https://studio.example/");
   expect(kb).toHaveLength(3);
@@ -100,4 +104,8 @@ test("listing photos: processed first, then originals, at most 10", () => {
   const many = Array.from({ length: 9 }, (_, i) => `o${i}`);
   expect(listingPhotos(["s1", "s2"], many)).toHaveLength(10);
   expect(listingPhotos(["s1", "s2"], many).slice(0, 2)).toEqual(["s1", "s2"]);
+  const studio = Array.from({ length: 10 }, (_, i) => `s${i}`);
+  const result = listingPhotos(studio, many);
+  expect(result.filter((x) => x.startsWith("o"))).toHaveLength(5);
+  expect(result).toHaveLength(10);
 });
