@@ -5,14 +5,17 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalAction, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+  type ActionCtx,
+} from "./_generated/server";
 import { MAX_QUESTION_LENGTH, parseDraft } from "./lib/agent";
 import { showDraft } from "./lib/showDraft";
+import { waitingText } from "./progress";
 import * as telegram from "./lib/telegramApi";
 import { answerValidator, draftValidator } from "./lib/validators";
-
-const QUEUED_TEXT = (n: number) =>
-  `📥 Фото получены (${n}). Черновик придёт через пару минут. Если не пришёл — напишите Claude в чат «разбери».`;
 
 export const markQueued = internalMutation({
   args: { itemId: v.id("items"), photoAt: v.number() },
@@ -30,8 +33,11 @@ export const markQueued = internalMutation({
 export async function enqueueForChat(ctx: ActionCtx, itemId: Id<"items">, photoAt: number) {
   const job = await ctx.runMutation(internal.manual.markQueued, { itemId, photoAt });
   if (!job) return;
-  const messageId = await telegram.sendMessage(job.chatId, QUEUED_TEXT(job.photos));
-  await ctx.runMutation(internal.items.setStatusMessage, { itemId, messageId });
+  const startedAt = Date.now();
+  const etaMs = await ctx.runQuery(internal.progress.eta, {});
+  const messageId = await telegram.sendMessage(job.chatId, waitingText(job.photos, 0, etaMs, true));
+  // Its own message, updated until the draft arrives below it (progress.ts).
+  await ctx.runMutation(internal.progress.startWaiting, { itemId, messageId, startedAt });
 }
 
 export const queue = internalQuery({
@@ -45,7 +51,9 @@ export const queue = internalQuery({
         photoUrls: v.array(v.string()),
       }),
     ),
-    rewrite: v.array(v.object({ itemId: v.id("items"), instruction: v.string(), draft: draftValidator })),
+    rewrite: v.array(
+      v.object({ itemId: v.id("items"), instruction: v.string(), draft: draftValidator }),
+    ),
   }),
   handler: async (ctx) => {
     const queued = await ctx.db
@@ -91,7 +99,11 @@ export const submitDraft = internalAction({
         costUsd: 0,
       });
     } else if (item.status === "draft" && item.rewriteRequest) {
-      await ctx.runMutation(internal.items.updateDraftText, { itemId, draft: parsed.draft, costUsd: 0 });
+      await ctx.runMutation(internal.items.updateDraftText, {
+        itemId,
+        draft: parsed.draft,
+        costUsd: 0,
+      });
     } else {
       return `item is ${item.status}, nothing to submit`;
     }
@@ -105,7 +117,8 @@ export const ask = internalAction({
   returns: v.string(),
   handler: async (ctx, { itemId, question }): Promise<string> => {
     const q = question.trim();
-    if (!q || q.length > MAX_QUESTION_LENGTH) return `question must be 1–${MAX_QUESTION_LENGTH} characters`;
+    if (!q || q.length > MAX_QUESTION_LENGTH)
+      return `question must be 1–${MAX_QUESTION_LENGTH} characters`;
     const item: Doc<"items"> | null = await ctx.runQuery(internal.items.get, { itemId });
     if (!item || item.status !== "queued") return "item is not queued";
     await ctx.runMutation(internal.items.saveQuestion, { itemId, question: q, costUsd: 0 });

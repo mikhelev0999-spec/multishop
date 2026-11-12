@@ -32,7 +32,9 @@ async function serve(ctx: ActionCtx, path: string, cacheControl: string): Promis
   const file = await ctx.runQuery(internal.site.byPath, { path });
   const blob = file ? await ctx.storage.get(file.storageId) : null;
   if (!file || !blob) return new Response("not found", { status: 404 });
-  return new Response(blob, { headers: { "content-type": file.contentType, "cache-control": cacheControl } });
+  return new Response(blob, {
+    headers: { "content-type": file.contentType, "cache-control": cacheControl },
+  });
 }
 
 // The photo studio page (Telegram Mini App). The page itself is never cached so a new build

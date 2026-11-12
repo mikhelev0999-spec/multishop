@@ -28,6 +28,11 @@ export default defineSchema({
     /** Manual mode: the owner's "what to change" waiting for Claude in the chat. */
     rewriteRequest: v.optional(v.string()),
     listedAt: v.optional(v.number()),
+    /** The "⏳ Разбираю фото…" message and when that wait began (progress.ts). */
+    progressMessageId: v.optional(v.number()),
+    waitStartedAt: v.optional(v.number()),
+    /** When the draft or question was ready: history for the waiting-time estimate. */
+    readyAt: v.optional(v.number()),
     soldPriceUah: v.optional(v.number()),
     soldAt: v.optional(v.number()),
     costUsd: v.number(),

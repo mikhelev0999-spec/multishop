@@ -79,7 +79,8 @@ test("without a key, photos are queued for Claude in the chat", async () => {
   const [item] = await items(t);
   expect(item.status).toBe("queued");
   expect(runAgent).not.toHaveBeenCalled();
-  expect(sentTexts()[0]).toContain("Черновик придёт через пару минут");
+  expect(sentTexts()[0]).toContain("⏳ Разбираю фото (1)…");
+  expect(sentTexts()[0]).toContain("напишите Claude в чат «разбери»");
 
   const q = await t.query(internal.manual.queue, {});
   expect(q.analyze).toHaveLength(1);
@@ -92,13 +93,14 @@ test("a submitted draft replaces the queue message", async () => {
   const t = convexTest(schema, modules);
   await deliver(t, photo("a"));
   const [queued] = await items(t);
-  expect(await t.action(internal.manual.submitDraft, { itemId: queued._id, draft: draftInput })).toBe("ok");
+  expect(
+    await t.action(internal.manual.submitDraft, { itemId: queued._id, draft: draftInput }),
+  ).toBe("ok");
 
   const [item] = await items(t);
   expect(item.status).toBe("draft");
   expect(item.draft?.titleUk).toBe("Чайник Bosch TWK");
-  const [, messageId, text, keyboard] = vi.mocked(tg.editMessageText).mock.calls[0];
-  expect(messageId).toBe(600);
+  const [, text, keyboard] = vi.mocked(tg.sendMessage).mock.calls.at(-1)!;
   expect(text).toContain("разбор вручную");
   expect((keyboard?.[0][0] as { callbackData: string }).callbackData).toBe(`publish:${item._id}`);
 });
@@ -119,8 +121,10 @@ test("a question goes to the owner and the answer re-queues the item", async () 
   const t = convexTest(schema, modules);
   await deliver(t, photo("a"));
   const [queued] = await items(t);
-  expect(await t.action(internal.manual.ask, { itemId: queued._id, question: "Он включается?" })).toBe("ok");
-  expect(tg.editMessageText).toHaveBeenCalledWith(CHAT, 600, "❓ Он включается?");
+  expect(
+    await t.action(internal.manual.ask, { itemId: queued._id, question: "Он включается?" }),
+  ).toBe("ok");
+  expect(tg.sendMessage).toHaveBeenLastCalledWith(CHAT, "❓ Он включается?");
   expect((await items(t))[0].status).toBe("needs_input");
 
   await deliver(t, update({ text: "да" }));
@@ -139,13 +143,23 @@ test("'change text' waits for Claude in the chat and keeps the price", async () 
 
   await deliver(
     t,
-    { update_id: updateId++, callback_query: { id: "cb", from: { id: OWNER }, data: `text:${queued._id}`, message: { message_id: 600, chat: { id: CHAT } } } },
+    {
+      update_id: updateId++,
+      callback_query: {
+        id: "cb",
+        from: { id: OWNER },
+        data: `text:${queued._id}`,
+        message: { message_id: 600, chat: { id: CHAT } },
+      },
+    },
     update({ text: "добавь, что шнур длинный" }),
   );
   expect(runRewrite).not.toHaveBeenCalled();
   expect(sentTexts().at(-1)).toContain("«перепиши»");
   const q = await t.query(internal.manual.queue, {});
-  expect(q.rewrite).toMatchObject([{ itemId: queued._id, instruction: "добавь, что шнур длинный" }]);
+  expect(q.rewrite).toMatchObject([
+    { itemId: queued._id, instruction: "добавь, что шнур длинный" },
+  ]);
 
   const res = await t.action(internal.manual.submitDraft, {
     itemId: queued._id,
@@ -163,6 +177,9 @@ test("submitting for an item that is not waiting does nothing", async () => {
   await deliver(t, photo("a"));
   const [queued] = await items(t);
   await t.action(internal.manual.submitDraft, { itemId: queued._id, draft: draftInput });
-  const again = await t.action(internal.manual.submitDraft, { itemId: queued._id, draft: draftInput });
+  const again = await t.action(internal.manual.submitDraft, {
+    itemId: queued._id,
+    draft: draftInput,
+  });
   expect(again).toBe("item is draft, nothing to submit");
 });

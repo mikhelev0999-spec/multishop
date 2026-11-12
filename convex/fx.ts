@@ -1,11 +1,19 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+  type ActionCtx,
+} from "./_generated/server";
 import { fetchUsdUah, kyivDate } from "./lib/nbu";
 
 export const cachedRate = internalQuery({
   args: { date: v.string() },
-  returns: v.object({ today: v.union(v.number(), v.null()), latest: v.union(v.number(), v.null()) }),
+  returns: v.object({
+    today: v.union(v.number(), v.null()),
+    latest: v.union(v.number(), v.null()),
+  }),
   handler: async (ctx, { date }) => {
     const today = await ctx.db
       .query("fxRates")

@@ -8,7 +8,12 @@ const modules = import.meta.glob("./**/*.*s");
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
-async function publish(t: ReturnType<typeof convexTest>, path: string, body: string, contentType: string) {
+async function publish(
+  t: ReturnType<typeof convexTest>,
+  path: string,
+  body: string,
+  contentType: string,
+) {
   const storageId = await t.run((ctx) => ctx.storage.store(new Blob([body])));
   await t.mutation(internal.site.register, { path, storageId, contentType });
   return storageId;
@@ -16,7 +21,12 @@ async function publish(t: ReturnType<typeof convexTest>, path: string, body: str
 
 test("the studio page and its assets are served with their types", async () => {
   const t = convexTest(schema, modules);
-  await publish(t, "index.html", "<!doctype html><title>Studio</title>", "text/html; charset=utf-8");
+  await publish(
+    t,
+    "index.html",
+    "<!doctype html><title>Studio</title>",
+    "text/html; charset=utf-8",
+  );
   await publish(t, "assets/app.js", "console.log(1)", "text/javascript");
 
   const page = await t.fetch("/studio?item=abc", { method: "GET" });

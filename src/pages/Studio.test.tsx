@@ -235,3 +235,35 @@ test("reset brings the settings back to automatic defaults", async () => {
   expect(screen.getByRole("checkbox", { name: /Авто-коррекция/ })).toBeChecked();
   expect(screen.getByRole("slider", { name: /Резкость/ })).toHaveValue("30");
 });
+
+test("while removing the background a progress bar and the time left are shown", async () => {
+  const user = userEvent.setup();
+  let finish: (b: Blob) => void = () => {};
+  vi.mocked(removeBackground).mockImplementationOnce(
+    () => new Promise<Blob>((resolve) => (finish = resolve)),
+  );
+  renderStudio();
+  await screen.findByText("Чоботи Chloé Betty");
+  await user.click(screen.getByRole("button", { name: "Обработать" }));
+  expect(await screen.findByRole("progressbar")).toBeInTheDocument();
+  expect(screen.getByText(/Осталось ≈ \d+ с/)).toBeInTheDocument();
+  finish(new Blob(["cut"]));
+  await screen.findByRole("button", { name: "Сохранить" });
+  expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+});
+
+test("during the one-time model download the bar shows the download", async () => {
+  const user = userEvent.setup();
+  let finish: (b: Blob) => void = () => {};
+  vi.mocked(removeBackground).mockImplementationOnce((_img, onDownload) => {
+    onDownload?.(30, 100);
+    return new Promise<Blob>((resolve) => (finish = resolve));
+  });
+  renderStudio();
+  await screen.findByText("Чоботи Chloé Betty");
+  await user.click(screen.getByRole("button", { name: "Обработать" }));
+  expect(await screen.findByRole("progressbar")).toHaveAttribute("aria-valuenow", "30");
+  expect(screen.getByText("только в первый раз")).toBeInTheDocument();
+  finish(new Blob(["cut"]));
+  await screen.findByRole("button", { name: "Сохранить" });
+});

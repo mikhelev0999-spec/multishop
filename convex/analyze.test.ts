@@ -55,7 +55,9 @@ afterEach(() => {
 
 async function collectingItem(t: ReturnType<typeof convexTest>) {
   return t.run(async (ctx) => {
-    const photo = await ctx.storage.store(new Blob([new Uint8Array([255, 216, 255])], { type: "image/jpeg" }));
+    const photo = await ctx.storage.store(
+      new Blob([new Uint8Array([255, 216, 255])], { type: "image/jpeg" }),
+    );
     return ctx.db.insert("items", {
       chatId: 1,
       status: "collecting",
@@ -67,7 +69,7 @@ async function collectingItem(t: ReturnType<typeof convexTest>) {
   });
 }
 
-test("a draft replaces the 'working' message and stores comparables", async () => {
+test("a progress message first, then the draft below it, comparables stored", async () => {
   const t = convexTest(schema, modules);
   const itemId = await collectingItem(t);
   vi.mocked(runAgent).mockResolvedValue({
@@ -79,10 +81,11 @@ test("a draft replaces the 'working' message and stores comparables", async () =
 
   await t.action(internal.analyze.start, { itemId, photoAt: 100 });
 
-  expect(tg.sendMessage).toHaveBeenCalledWith(1, "Разбираюсь… (фото: 1)");
-  expect(vi.mocked(runAgent).mock.calls[0][0].photos).toEqual([{ mediaType: "image/jpeg", base64: "/9j/" }]);
-  const [, messageId, text, keyboard] = vi.mocked(tg.editMessageText).mock.calls[0];
-  expect(messageId).toBe(777);
+  expect(vi.mocked(tg.sendMessage).mock.calls[0][1]).toContain("⏳ Разбираю фото (1)…");
+  expect(vi.mocked(runAgent).mock.calls[0][0].photos).toEqual([
+    { mediaType: "image/jpeg", base64: "/9j/" },
+  ]);
+  const [, text, keyboard] = vi.mocked(tg.sendMessage).mock.calls[1];
   expect(text).toContain("📦 Чайник Bosch");
   expect(text).toContain("🤖 анализ $0.09");
   expect((keyboard?.[0][0] as { callbackData: string }).callbackData).toBe(`publish:${itemId}`);
@@ -115,14 +118,18 @@ test("an error marks the item failed and tells the owner", async () => {
   );
 });
 
-test("a question is stored and shown in place of the 'working' message", async () => {
+test("a question is stored and sent as a new message", async () => {
   const t = convexTest(schema, modules);
   const itemId = await collectingItem(t);
-  vi.mocked(runAgent).mockResolvedValue({ kind: "question", question: "Он включается?", costUsd: 0.03 });
+  vi.mocked(runAgent).mockResolvedValue({
+    kind: "question",
+    question: "Он включается?",
+    costUsd: 0.03,
+  });
   await t.action(internal.analyze.start, { itemId, photoAt: 100 });
   const item = await t.run((ctx) => ctx.db.get(itemId));
   expect(item).toMatchObject({ status: "needs_input", question: "Он включается?", costUsd: 0.03 });
-  expect(tg.editMessageText).toHaveBeenCalledWith(1, 777, "❓ Он включается?");
+  expect(tg.sendMessage).toHaveBeenLastCalledWith(1, "❓ Он включается?");
 });
 
 test("if even the 'working' message fails, the item is failed, not stuck in analyzing", async () => {
@@ -139,9 +146,14 @@ test("a draft that Telegram refuses to show stays a draft", async () => {
   const t = convexTest(schema, modules);
   const itemId = await collectingItem(t);
   vi.mocked(runAgent).mockResolvedValue({ kind: "draft", draft, comparables: [], costUsd: 0 });
-  vi.mocked(tg.editMessageText).mockRejectedValueOnce(new Error("Bad Request: message is too long"));
+  // 1st send: the progress message; 2nd: the draft, which Telegram refuses.
+  vi.mocked(tg.sendMessage)
+    .mockResolvedValueOnce(777)
+    .mockRejectedValueOnce(new Error("Bad Request: message is too long"));
   await t.action(internal.analyze.start, { itemId, photoAt: 100 });
   const item = await t.run((ctx) => ctx.db.get(itemId));
   expect(item?.status).toBe("draft");
-  expect(vi.mocked(tg.editMessageText).mock.calls[1][2]).toContain("Черновик готов, но Telegram не принял");
+  expect(vi.mocked(tg.editMessageText).mock.calls.at(-1)?.[2]).toContain(
+    "Черновик готов, но Telegram не принял",
+  );
 });

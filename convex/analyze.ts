@@ -8,6 +8,7 @@ import { createMessage } from "./lib/claude";
 import { searchByImage, searchByKeywords } from "./lib/ebay";
 import { isManualMode } from "./lib/mode";
 import { showDraft } from "./lib/showDraft";
+import { waitingText } from "./progress";
 import { enqueueForChat } from "./manual";
 import * as telegram from "./lib/telegramApi";
 
@@ -31,11 +32,18 @@ export const start = internalAction({
     // Once the outcome is stored, a failure to show it must not turn the item into "failed".
     let saved = false;
     try {
+      const startedAt = Date.now();
+      const etaMs = await ctx.runQuery(internal.progress.eta, {});
       statusId = await telegram.sendMessage(
         job.chatId,
-        `Разбираюсь… (фото: ${job.photoIds.length})`,
+        waitingText(job.photoIds.length, 0, etaMs, false),
       );
-      await ctx.runMutation(internal.items.setStatusMessage, { itemId, messageId: statusId });
+      // A separate progress message; the draft or question comes as a new message below it.
+      await ctx.runMutation(internal.progress.startWaiting, {
+        itemId,
+        messageId: statusId,
+        startedAt,
+      });
       // "typing…" while Claude looks at the photos; Telegram shows it for ~5 s, so repeat it.
       const typing = () => telegram.sendChatAction(job.chatId, "typing").catch(() => {});
       await typing();
@@ -64,7 +72,7 @@ export const start = internalAction({
           costUsd: result.costUsd,
         });
         saved = true;
-        await telegram.editMessageText(job.chatId, statusId, `❓ ${result.question}`);
+        await telegram.sendMessage(job.chatId, `❓ ${result.question}`);
         return null;
       }
       await ctx.runMutation(internal.items.saveDraft, {

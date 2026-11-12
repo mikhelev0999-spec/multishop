@@ -17,6 +17,7 @@ import {
   type StudioSettings,
 } from "../lib/studioSettings";
 import { closeMiniApp, getInitData, haptic, startMiniApp } from "../lib/telegram";
+import { formatLeft } from "../../convex/lib/progress";
 
 const BACKGROUNDS = [
   { name: "Белый", color: "#ffffff" },
@@ -25,6 +26,18 @@ const BACKGROUNDS = [
   { name: "Чёрный", color: "#111111" },
 ];
 const MAX_PHOTOS = 10;
+/** First guesses for one step; replaced by the measured average after the first photo. */
+const STEP_GUESS_MS = { remove: 12_000, save: 2_000 };
+
+/** Progress of a multi-photo job, for the bar and the "time left" estimate. */
+interface Progress {
+  done: number;
+  total: number;
+  stepStartedAt: number;
+  perStepMs: number;
+  /** Share of the one-time model download, while it runs. */
+  download?: number;
+}
 
 interface Result {
   originalUrl: string;
@@ -51,6 +64,15 @@ export default function Studio() {
   const [results, setResults] = useState<Result[]>([]);
   const [phase, setPhase] = useState<Phase>("loading");
   const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Re-render twice a second while something runs, so the bar and the time left move.
+  useEffect(() => {
+    if (!progress) return;
+    const timer = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [progress]);
   const [error, setError] = useState("");
 
   useEffect(() => saveSettings(settings), [settings]);
@@ -102,17 +124,30 @@ export default function Studio() {
     setPhase("working");
     const chosen = item.photos.filter((_, i) => selected.has(i));
     const out: Result[] = [];
+    const took: number[] = [];
     try {
       for (const [n, photo] of chosen.entries()) {
+        const stepStartedAt = Date.now();
+        setProgress({
+          done: n,
+          total: chosen.length,
+          stepStartedAt,
+          perStepMs: average(took) ?? STEP_GUESS_MS.remove,
+        });
         setStatus(`Фото ${n + 1} из ${chosen.length}: убираю фон…`);
         const res = await fetch(photo.url);
         if ("ok" in res && !res.ok) throw new Error(`Не удалось скачать фото ${n + 1}`);
         const original = await res.blob();
+        let downloaded = false;
         const cutout = await removeBackground(original, (done, total) => {
           if (total > 0 && done < total) {
+            downloaded = true;
+            setProgress((p) => (p ? { ...p, download: done / total } : p));
             setStatus(
               `Загружаю модель: ${Math.round((done / total) * 100)}% (только в первый раз)`,
             );
+          } else if (total > 0) {
+            setProgress((p) => (p ? { ...p, download: undefined, stepStartedAt: Date.now() } : p));
           }
         });
         out.push({
@@ -120,6 +155,8 @@ export default function Studio() {
           cutout,
           preview: await prepareCutout(cutout, PREVIEW_SIZE),
         });
+        // A step that included the one-time model download says nothing about the next ones.
+        if (!downloaded) took.push(Date.now() - stepStartedAt);
       }
       setResults(out);
       setPhase("processed");
@@ -130,6 +167,7 @@ export default function Studio() {
       haptic("error");
     } finally {
       setStatus("");
+      setProgress(null);
     }
   }
 
@@ -140,10 +178,27 @@ export default function Studio() {
     setPhase("saving");
     try {
       const outputs: Blob[] = [];
+      const took: number[] = [];
+      // One step per photo plus one for the upload.
+      const steps = results.length + 1;
       for (const [n, r] of results.entries()) {
+        const stepStartedAt = Date.now();
+        setProgress({
+          done: n,
+          total: steps,
+          stepStartedAt,
+          perStepMs: average(took) ?? STEP_GUESS_MS.save,
+        });
         setStatus(`Готовлю фото ${n + 1} из ${results.length} в полном размере…`);
         outputs.push(await composeOnBackground(r.cutout, settings));
+        took.push(Date.now() - stepStartedAt);
       }
+      setProgress({
+        done: results.length,
+        total: steps,
+        stepStartedAt: Date.now(),
+        perStepMs: average(took) ?? STEP_GUESS_MS.save,
+      });
       setStatus("Сохраняю…");
       await saveProcessed(initData, itemId, outputs, [...keep]);
       setPhase("saved");
@@ -155,6 +210,7 @@ export default function Studio() {
       haptic("error");
     } finally {
       setStatus("");
+      setProgress(null);
     }
   }
 
@@ -219,15 +275,7 @@ export default function Studio() {
             <h1 className="mt-1 text-xl leading-tight font-semibold">{item.title}</h1>
           </header>
 
-          {status && (
-            <div
-              aria-live="polite"
-              className="flex items-center gap-3 rounded-2xl bg-tg-section p-4"
-            >
-              <Dots />
-              <span className="text-sm">{status}</span>
-            </div>
-          )}
+          {status && <ProgressCard status={status} progress={progress} now={now} />}
 
           {showResults ? (
             <Section
@@ -477,6 +525,50 @@ function LivePreview(props: { prepared: Prepared; settings: StudioSettings; labe
       width={PREVIEW_SIZE}
       height={PREVIEW_SIZE}
     />
+  );
+}
+
+const average = (xs: number[]) =>
+  xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined;
+
+/** Status line, a bar and the time left; during the model download the bar shows the download. */
+function ProgressCard(props: { status: string; progress: Progress | null; now: number }) {
+  const p = props.progress;
+  let share: number | null = null;
+  let left = "";
+  if (p?.download !== undefined) {
+    share = p.download;
+    left = "только в первый раз";
+  } else if (p) {
+    const inStep = Math.min(0.95, Math.max(0, props.now - p.stepStartedAt) / p.perStepMs);
+    share = (p.done + inStep) / p.total;
+    const leftMs = p.perStepMs * (p.total - p.done) - (props.now - p.stepStartedAt);
+    left = leftMs > 1500 ? `Осталось ${formatLeft(leftMs)}` : "Почти готово…";
+  }
+  return (
+    <div aria-live="polite" className="space-y-2 rounded-2xl bg-tg-section p-4">
+      <div className="flex items-center gap-3">
+        <Dots />
+        <span className="text-sm">{props.status}</span>
+      </div>
+      {share !== null && (
+        <>
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(share * 100)}
+            className="h-1.5 overflow-hidden rounded-full bg-tg-separator"
+          >
+            <div
+              className="h-full rounded-full bg-tg-accent transition-[width] duration-500"
+              style={{ width: `${Math.round(share * 100)}%` }}
+            />
+          </div>
+          <p className="text-xs text-tg-hint">{left}</p>
+        </>
+      )}
+    </div>
   );
 }
 

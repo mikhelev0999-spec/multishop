@@ -114,7 +114,12 @@ export const beginAnalysis = internalMutation({
     if (!item || item.lastPhotoAt !== photoAt) return null;
     if (item.status !== "collecting" && item.status !== "needs_input") return null;
     const run = (item.analysisRun ?? 0) + 1;
-    await ctx.db.patch(itemId, { status: "analyzing", question: undefined, error: undefined, analysisRun: run });
+    await ctx.db.patch(itemId, {
+      status: "analyzing",
+      question: undefined,
+      error: undefined,
+      analysisRun: run,
+    });
     await ctx.scheduler.runAfter(WATCHDOG_MS, internal.items.watchdog, { itemId, run });
     return {
       chatId: item.chatId,
@@ -161,7 +166,12 @@ export const saveDraft = internalMutation({
   handler: async (ctx, { itemId, draft, comparables, costUsd }) => {
     const item = await ctx.db.get(itemId);
     if (!item) return null;
-    await ctx.db.patch(itemId, { status: "draft", draft, costUsd: item.costUsd + costUsd });
+    await ctx.db.patch(itemId, {
+      status: "draft",
+      draft,
+      costUsd: item.costUsd + costUsd,
+      readyAt: Date.now(),
+    });
     for (const c of comparables) {
       await ctx.db.insert("priceResearch", { itemId, source: "ebay", ...c });
     }
@@ -176,7 +186,12 @@ export const saveQuestion = internalMutation({
     const item = await ctx.db.get(itemId);
     if (!item) return null;
     await clearAwaiting(ctx);
-    await ctx.db.patch(itemId, { status: "needs_input", question, costUsd: item.costUsd + costUsd });
+    await ctx.db.patch(itemId, {
+      status: "needs_input",
+      question,
+      costUsd: item.costUsd + costUsd,
+      readyAt: Date.now(),
+    });
     return null;
   },
 });

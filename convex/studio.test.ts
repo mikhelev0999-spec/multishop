@@ -25,7 +25,9 @@ const TOKEN = "123456:TEST";
 const OWNER = 42;
 
 async function hmac(key: BufferSource, msg: string) {
-  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
   return crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg));
 }
 async function initData(userId = OWNER): Promise<string> {
@@ -38,7 +40,9 @@ async function initData(userId = OWNER): Promise<string> {
     .map((k) => `${k}=${fields[k]}`)
     .join("\n");
   const secret = await hmac(new TextEncoder().encode("WebAppData"), TOKEN);
-  const hash = [...new Uint8Array(await hmac(secret, check))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const hash = [...new Uint8Array(await hmac(secret, check))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
   return new URLSearchParams({ ...fields, hash }).toString();
 }
 
@@ -66,7 +70,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-const jpeg = () => new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])], { type: "image/jpeg" });
+const jpeg = () =>
+  new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])], { type: "image/jpeg" });
 
 async function draftItem(t: ReturnType<typeof convexTest>, status: "draft" | "approved" = "draft") {
   return t.run(async (ctx) => {
@@ -95,15 +100,17 @@ describe("access", () => {
   test("a stranger's initData is refused", async () => {
     const t = convexTest(schema, modules);
     const itemId = await draftItem(t);
-    await expect(t.action(api.studio.load, { initData: await initData(7), itemId })).rejects.toThrow(
-      "владельцу",
-    );
+    await expect(
+      t.action(api.studio.load, { initData: await initData(7), itemId }),
+    ).rejects.toThrow("владельцу");
   });
 
   test("garbage initData is refused", async () => {
     const t = convexTest(schema, modules);
     const itemId = await draftItem(t);
-    await expect(t.action(api.studio.load, { initData: "hash=00&user=%7B%7D", itemId })).rejects.toThrow();
+    await expect(
+      t.action(api.studio.load, { initData: "hash=00&user=%7B%7D", itemId }),
+    ).rejects.toThrow();
   });
 
   test("only drafts can be edited", async () => {
@@ -129,7 +136,11 @@ describe("flow", () => {
   test("uploadUrls hands out one URL per photo, at most 10", async () => {
     const t = convexTest(schema, modules);
     const itemId = await draftItem(t);
-    const urls = await t.action(api.studio.uploadUrls, { initData: await initData(), itemId, count: 2 });
+    const urls = await t.action(api.studio.uploadUrls, {
+      initData: await initData(),
+      itemId,
+      count: 2,
+    });
     expect(urls).toHaveLength(2);
     await expect(
       t.action(api.studio.uploadUrls, { initData: await initData(), itemId, count: 11 }),
@@ -203,7 +214,11 @@ describe("review fixes", () => {
     const original = (await t.run((ctx) => ctx.db.get(itemId)))!.photoIds[0];
     const fresh = await store(t, new Blob([new Uint8Array([1, 2, 3])]));
     await expect(
-      t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [original, fresh] }),
+      t.action(api.studio.save, {
+        initData: await initData(),
+        itemId,
+        storageIds: [original, fresh],
+      }),
     ).rejects.toThrow("чужой файл");
     expect(await exists(t, original)).toBe(true);
     expect(await exists(t, fresh)).toBe(false);
@@ -227,7 +242,11 @@ describe("review fixes", () => {
     const first = await store(t);
     await t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [first] });
     const second = await store(t);
-    await t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [first, second] });
+    await t.action(api.studio.save, {
+      initData: await initData(),
+      itemId,
+      storageIds: [first, second],
+    });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
     expect((await t.run((ctx) => ctx.db.get(itemId)))?.studioPhotoIds).toEqual([first, second]);
     expect(await exists(t, first)).toBe(true);
@@ -293,7 +312,11 @@ describe("review fixes", () => {
     const t = convexTest(schema, modules);
     const itemId = await draftItem(t);
     vi.mocked(tg.sendMediaGroup).mockRejectedValueOnce(new Error("WEBPAGE_CURL_FAILED"));
-    await t.action(api.studio.save, { initData: await initData(), itemId, storageIds: [await store(t)] });
+    await t.action(api.studio.save, {
+      initData: await initData(),
+      itemId,
+      storageIds: [await store(t)],
+    });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
     expect(vi.mocked(tg.sendMessage).mock.calls.at(-1)?.[1]).toContain("Не удалось отправить фото");
   });

@@ -19,9 +19,16 @@ async function requireOwner(initData: string): Promise<void> {
   if (!token || !owner) throw new ConvexError("Бот не настроен");
   let userId: number;
   try {
-    ({ userId } = await verifyInitData(initData, token, Math.floor(Date.now() / 1000), STUDIO_INIT_DATA_MAX_AGE_SEC));
+    ({ userId } = await verifyInitData(
+      initData,
+      token,
+      Math.floor(Date.now() / 1000),
+      STUDIO_INIT_DATA_MAX_AGE_SEC,
+    ));
   } catch {
-    throw new ConvexError("Не удалось проверить вход через Telegram — откройте студию заново из бота");
+    throw new ConvexError(
+      "Не удалось проверить вход через Telegram — откройте студию заново из бота",
+    );
   }
   if (userId !== owner) throw new ConvexError("Студия доступна только владельцу бота");
 }
@@ -42,7 +49,11 @@ const photoValidator = v.object({ storageId: v.id("_storage"), url: v.string() }
 
 export const load = action({
   args: { initData: v.string(), itemId: v.id("items") },
-  returns: v.object({ title: v.string(), photos: v.array(photoValidator), studio: v.array(photoValidator) }),
+  returns: v.object({
+    title: v.string(),
+    photos: v.array(photoValidator),
+    studio: v.array(photoValidator),
+  }),
   handler: async (ctx, { initData, itemId }) => {
     await requireOwner(initData);
     const it = await draftItem(ctx, itemId);
@@ -93,10 +104,13 @@ export const fileCheck = internalQuery({
   handler: async (ctx, { itemId, storageId }) => {
     const owner = await ownerOf(ctx, storageId);
     if (owner) {
-      return owner.itemId === itemId && owner.kind === "studio" ? { kind: "kept" as const } : { kind: "foreign" as const };
+      return owner.itemId === itemId && owner.kind === "studio"
+        ? { kind: "kept" as const }
+        : { kind: "foreign" as const };
     }
     const meta = await ctx.db.system.get(storageId);
-    if (!meta || meta._creationTime < Date.now() - UPLOAD_MAX_AGE_MS) return { kind: "foreign" as const };
+    if (!meta || meta._creationTime < Date.now() - UPLOAD_MAX_AGE_MS)
+      return { kind: "foreign" as const };
     return { kind: "new" as const, size: meta.size };
   },
 });
@@ -111,7 +125,11 @@ export const save = action({
   handler: async (ctx, { initData, itemId, storageIds }) => {
     await requireOwner(initData);
     await draftItem(ctx, itemId);
-    if (storageIds.length === 0 || storageIds.length > MAX_LISTING_PHOTOS || new Set(storageIds).size !== storageIds.length) {
+    if (
+      storageIds.length === 0 ||
+      storageIds.length > MAX_LISTING_PHOTOS ||
+      new Set(storageIds).size !== storageIds.length
+    ) {
       throw new ConvexError(`Нужно от 1 до ${MAX_LISTING_PHOTOS} разных фото`);
     }
 
@@ -161,7 +179,10 @@ export const attach = internalMutation({
     await ctx.db.patch(itemId, { studioPhotoIds: storageIds });
     const added = storageIds.filter((id) => !(it.studioPhotoIds ?? []).includes(id));
     if (added.length > 0) {
-      await ctx.scheduler.runAfter(0, internal.bot.sendPhotos, { chatId: it.chatId, storageIds: added });
+      await ctx.scheduler.runAfter(0, internal.bot.sendPhotos, {
+        chatId: it.chatId,
+        storageIds: added,
+      });
     }
     return null;
   },

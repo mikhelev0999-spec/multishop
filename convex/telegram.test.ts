@@ -301,7 +301,7 @@ describe("owner replies", () => {
     await deliver(t, photo("phone"));
     let [item] = await items(t);
     expect(item.status).toBe("needs_input");
-    expect(tg.editMessageText).toHaveBeenCalledWith(CHAT, 500, "❓ Сколько памяти?");
+    expect(tg.sendMessage).toHaveBeenCalledWith(CHAT, "❓ Сколько памяти?");
 
     await deliver(t, text("128 ГБ"));
     [item] = await items(t);
