@@ -81,3 +81,26 @@ test("a callback with an unknown state is refused with a page", async () => {
   expect(await res.text()).toContain("Ссылка устарела");
   vi.unstubAllEnvs();
 });
+
+test("a valid callback connects the account and long values are cut", async () => {
+  vi.stubEnv("CONVEX_SITE_URL", "https://demo.convex.site");
+  vi.stubEnv("OLX_CLIENT_ID", "6005");
+  vi.stubEnv("OLX_CLIENT_SECRET", "s");
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ access_token: "A", expires_in: 60 }), { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const t = convexTest(schema, modules);
+  await t.mutation(internal.accounts.newState, { provider: "olx", chatId: 1, state: "s1" });
+  const code = "c".repeat(3000);
+  const res = await t.fetch(`/oauth/olx/callback?state=s1&code=${code}`, { method: "GET" });
+  expect(res.status).toBe(200);
+  expect(await res.text()).toContain("OLX подключён");
+  const tokenCall = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([u]) =>
+    u.includes("oauth/token"),
+  )!;
+  expect(JSON.parse(tokenCall[1].body as string).code).toHaveLength(2048);
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});

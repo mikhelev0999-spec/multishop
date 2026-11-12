@@ -114,6 +114,11 @@ describe("exchangeCode", () => {
     expect((err as Error).message).not.toContain("sec");
   });
 
+  test("an HTTP status without a code keeps its space", async () => {
+    stubFetch(502, {});
+    await expect(exchangeCode("olx", cfg, "C", 0)).rejects.toThrow("(HTTP 502)");
+  });
+
   test("a response without an access token is an error", async () => {
     stubFetch(200, { token_type: "bearer" });
     await expect(exchangeCode("ebay", cfg, "C", 0)).rejects.toThrow("eBay");

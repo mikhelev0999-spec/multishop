@@ -52,9 +52,7 @@ describe("show", () => {
     const state = url.searchParams.get("state")!;
     expect(state).toMatch(/^[0-9a-f]{64}$/);
     const rows = await t.run((ctx) => ctx.db.query("oauthStates").collect());
-    expect(rows).toEqual([
-      expect.objectContaining({ state, provider: "olx", chatId: CHAT }),
-    ]);
+    expect(rows).toEqual([expect.objectContaining({ state, provider: "olx", chatId: CHAT })]);
   });
 
   test("a connected account is shown as connected, with a reconnect link", async () => {
@@ -123,14 +121,24 @@ describe("complete", () => {
   test("unknown, foreign-provider or stale states are refused without a token request", async () => {
     vi.useFakeTimers();
     const t = convexTest(schema, modules);
-    expect((await t.action(internal.accounts.complete, { provider: "olx", state: "x", code: "C" })).ok)
-      .toBe(false);
+    expect(
+      (await t.action(internal.accounts.complete, { provider: "olx", state: "x", code: "C" })).ok,
+    ).toBe(false);
     await stateFor(t, "olx");
-    expect((await t.action(internal.accounts.complete, { provider: "ebay", state: "s1", code: "C" })).ok)
-      .toBe(false);
+    expect(
+      (await t.action(internal.accounts.complete, { provider: "ebay", state: "s1", code: "C" })).ok,
+    ).toBe(false);
+    // Burnt by the wrong-provider attempt: it can't be used for OLX afterwards either.
+    expect(
+      (await t.action(internal.accounts.complete, { provider: "olx", state: "s1", code: "C" })).ok,
+    ).toBe(false);
     await t.mutation(internal.accounts.newState, { provider: "olx", chatId: CHAT, state: "s2" });
     vi.advanceTimersByTime(16 * 60 * 1000);
-    const stale = await t.action(internal.accounts.complete, { provider: "olx", state: "s2", code: "C" });
+    const stale = await t.action(internal.accounts.complete, {
+      provider: "olx",
+      state: "s2",
+      code: "C",
+    });
     expect(stale.ok).toBe(false);
     expect(stale.text).toContain("Аккаунты");
     expect(exchangeCode).not.toHaveBeenCalled();
@@ -147,6 +155,58 @@ describe("complete", () => {
     expect(page.ok).toBe(false);
     expect(exchangeCode).not.toHaveBeenCalled();
     expect(lastSent()[1]).toContain("отменено");
+  });
+
+  test("a provider error other than a refusal is shown as an error, with a safe code", async () => {
+    const t = convexTest(schema, modules);
+    const page = await t.action(internal.accounts.complete, {
+      provider: "olx",
+      state: await stateFor(t, "olx"),
+      error: "invalid_scope<b>",
+    });
+    expect(page.ok).toBe(false);
+    expect(page.text).toContain("(invalid_scopeb)");
+    expect(lastSent()[1]).toContain("❌");
+    expect(lastSent()[1]).not.toContain("отменено");
+  });
+
+  test("eBay: the RuName is the redirect_uri", async () => {
+    vi.stubEnv("EBAY_CLIENT_ID", "app");
+    vi.stubEnv("EBAY_CLIENT_SECRET", "cert");
+    vi.stubEnv("EBAY_RUNAME", "Me-Multishop-PRD");
+    const t = convexTest(schema, modules);
+    const page = await t.action(internal.accounts.complete, {
+      provider: "ebay",
+      state: await stateFor(t, "ebay"),
+      code: "C",
+    });
+    expect(page.ok).toBe(true);
+    expect(exchangeCode).toHaveBeenCalledWith(
+      "ebay",
+      { clientId: "app", clientSecret: "cert", redirectUri: "Me-Multishop-PRD" },
+      "C",
+      expect.any(Number),
+    );
+  });
+
+  test("a failed save shows and logs no tokens", async () => {
+    const t = convexTest(schema, modules);
+    // A wrong type makes Convex reject the arguments; its error quotes them, tokens included.
+    vi.mocked(exchangeCode).mockResolvedValueOnce({
+      accessToken: "xxxxTOKEN",
+      accessExpiresAt: "soon" as unknown as number,
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const page = await t.action(internal.accounts.complete, {
+      provider: "olx",
+      state: await stateFor(t, "olx"),
+      code: "C",
+    });
+    expect(page.ok).toBe(false);
+    expect(page.text).toBe("OLX: не удалось сохранить доступ");
+    expect(lastSent()[1]).not.toContain("xxxx");
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("xxxx");
+    errors.mockRestore();
   });
 
   test("a failed token swap is reported to the owner and on the page", async () => {
@@ -171,6 +231,15 @@ describe("complete", () => {
     expect(page.ok).toBe(false);
     expect(exchangeCode).not.toHaveBeenCalled();
   });
+});
+
+test("if showing fails, the owner is told", async () => {
+  vi.stubEnv("CONVEX_SITE_URL", "");
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  const t = convexTest(schema, modules);
+  await t.action(internal.accounts.show, { chatId: CHAT });
+  expect(lastSent()[1]).toContain("Не удалось показать аккаунты");
+  errors.mockRestore();
 });
 
 test("old unused states are pruned", async () => {

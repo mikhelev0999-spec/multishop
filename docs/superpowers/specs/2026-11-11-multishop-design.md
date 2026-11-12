@@ -165,3 +165,6 @@
 - Токены живут только в базе Convex. В логах и ошибках их нет.
 - Ключи в переменных Convex: `OLX_CLIENT_ID`, `OLX_CLIENT_SECRET`, `EBAY_CLIENT_ID`,
   `EBAY_CLIENT_SECRET`, `EBAY_RUNAME`.
+- eBay не включает Production-ключи без настройки Marketplace Account Deletion: при создании
+  ключей выбрать отказ (приложение не хранит данные пользователей eBay) или сделать endpoint.
+- Обновление токенов по refresh token — на этапе публикации.

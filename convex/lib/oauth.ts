@@ -92,6 +92,9 @@ function tokenRequest(
   };
 }
 
+/** A provider's error code, reduced to characters that can't carry markup or data. */
+export const safeCode = (s: string) => s.slice(0, 60).replace(/[^\w.-]/g, "");
+
 /** Swaps the one-time code from the callback for tokens. `now` is ms since epoch. */
 export async function exchangeCode(
   provider: Provider,
@@ -111,8 +114,9 @@ export async function exchangeCode(
   const access = typeof json.access_token === "string" ? json.access_token : "";
   if (!res.ok || !access) {
     // Only the short error code: descriptions may echo request fields.
-    const reason = typeof json.error === "string" ? json.error.slice(0, 60) : `HTTP ${res.status}`;
-    throw new Error(`${name}: не удалось получить доступ (${reason.replace(/[^\w.-]/g, "")})`);
+    const reason =
+      typeof json.error === "string" ? safeCode(json.error) || "error" : `HTTP ${res.status}`;
+    throw new Error(`${name}: не удалось получить доступ (${reason})`);
   }
   const seconds = (x: unknown) => (typeof x === "number" && x > 0 ? x : undefined);
   const expiresIn = seconds(json.expires_in) ?? 3600;

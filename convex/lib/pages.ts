@@ -49,10 +49,10 @@ only to manage the owner's own listings.</li>
 <p>No data of other eBay or OLX users is collected, stored, sold or shared. No advertising or
 tracking is used.</p>
 <h2>Where and how long</h2>
-<p>Data is kept in the owner's Convex database until the owner deletes it. Disconnecting an
-account deletes its tokens.</p>
-<h2>Contact and deletion</h2>
-<p>To delete data, the owner deletes it in the Telegram bot or the database. Questions: write
-to the owner through the marketplace where you saw the listing.</p>`,
+<p>Data is kept in the owner's private Convex database until the owner deletes it there.
+The owner can withdraw the app's access at any time in the eBay or OLX account settings;
+the stored tokens then stop working and are deleted from the database.</p>
+<h2>Contact</h2>
+<p>Questions: write to the owner through the marketplace where you saw the listing.</p>`,
   );
 }

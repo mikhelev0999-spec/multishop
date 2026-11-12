@@ -2,10 +2,16 @@
 // one-time state; the marketplace sends the owner back to /oauth/<provider>/callback.
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery } from "./_generated/server";
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+  type ActionCtx,
+} from "./_generated/server";
 import { esc } from "./lib/botTexts";
 import {
   authorizeUrl,
+  safeCode,
   exchangeCode,
   PROVIDER_NAME,
   PROVIDERS,
@@ -93,41 +99,50 @@ export const show = internalAction({
   args: { chatId: v.number() },
   returns: v.null(),
   handler: async (ctx, { chatId }) => {
-    const site = siteUrl();
-    const connected = await ctx.runQuery(internal.accounts.connected, {});
-    const lines = ["<b>🔗 Аккаунты площадок</b>", ""];
-    const keyboard: telegram.Keyboard = [];
-    for (const provider of PROVIDERS) {
-      const name = PROVIDER_NAME[provider];
-      const account = connected.find((a) => a.provider === provider);
-      lines.push(
-        account
-          ? `✅ <b>${name}</b> — подключён ${esc(kyivDate(account.connectedAt))}`
-          : `⚪️ <b>${name}</b> — не подключён`,
-      );
-      const cfg = providerConfig(provider, site);
-      if (!cfg) {
-        lines.push("   нужны ключи разработчика — Claude подскажет, где их взять");
-        continue;
-      }
-      const state = randomState();
-      await ctx.runMutation(internal.accounts.newState, { provider, chatId, state });
-      keyboard.push([
-        {
-          text: account ? `🔄 Переподключить ${name}` : `🔗 Подключить ${name}`,
-          url: authorizeUrl(provider, cfg, state),
-        },
-      ]);
+    try {
+      await showAccounts(ctx, chatId);
+    } catch (e) {
+      console.error("accounts.show failed", e instanceof Error ? e.name : "error");
+      await tell(chatId, "❌ Не удалось показать аккаунты. Попробуйте ещё раз чуть позже.");
     }
-    if (keyboard.length) {
-      lines.push("", "Ссылка входа работает 15 минут. После «Разрешить» вернитесь сюда.");
-    }
-    await telegram.sendMessage(chatId, lines.join("\n"), keyboard.length ? keyboard : undefined, {
-      html: true,
-    });
     return null;
   },
 });
+
+async function showAccounts(ctx: ActionCtx, chatId: number) {
+  const site = siteUrl();
+  const connected = await ctx.runQuery(internal.accounts.connected, {});
+  const lines = ["<b>🔗 Аккаунты площадок</b>", ""];
+  const keyboard: telegram.Keyboard = [];
+  for (const provider of PROVIDERS) {
+    const name = PROVIDER_NAME[provider];
+    const account = connected.find((a) => a.provider === provider);
+    lines.push(
+      account
+        ? `✅ <b>${name}</b> — подключён ${esc(kyivDate(account.connectedAt))}`
+        : `⚪️ <b>${name}</b> — не подключён`,
+    );
+    const cfg = providerConfig(provider, site);
+    if (!cfg) {
+      lines.push("   нужны ключи разработчика — Claude подскажет, где их взять");
+      continue;
+    }
+    const state = randomState();
+    await ctx.runMutation(internal.accounts.newState, { provider, chatId, state });
+    keyboard.push([
+      {
+        text: account ? `🔄 Переподключить ${name}` : `🔗 Подключить ${name}`,
+        url: authorizeUrl(provider, cfg, state),
+      },
+    ]);
+  }
+  if (keyboard.length) {
+    lines.push("", "Ссылка входа работает 15 минут. После «Разрешить» вернитесь сюда.");
+  }
+  await telegram.sendMessage(chatId, lines.join("\n"), keyboard.length ? keyboard : undefined, {
+    html: true,
+  });
+}
 
 const resultValidator = v.object({ ok: v.boolean(), title: v.string(), text: v.string() });
 type Result = { ok: boolean; title: string; text: string };
@@ -161,20 +176,35 @@ export const complete = internalAction({
         text: "Откройте в боте «🔗 Аккаунты» и нажмите кнопку подключения ещё раз.",
       };
     }
-    if (error || !code) {
+    if (error === "access_denied" || (!error && !code)) {
       await tell(chatId, `${name}: подключение отменено.`);
       return { ok: false, title: "Подключение отменено", text: "Аккаунт не подключён." };
+    }
+    if (error || !code) {
+      const reason = `${name} вернул ошибку (${safeCode(error ?? "") || "error"})`;
+      await tell(chatId, `❌ ${reason}. Попробуйте ещё раз: «🔗 Аккаунты».`);
+      return { ok: false, title: "Не подключено", text: reason };
     }
     const cfg = providerConfig(provider, siteUrl());
     if (!cfg) {
       await tell(chatId, `❌ ${name}: в Convex нет ключей разработчика.`);
       return { ok: false, title: "Не подключено", text: "В Convex нет ключей разработчика." };
     }
+    let tokens;
     try {
-      const tokens = await exchangeCode(provider, cfg, code, Date.now());
-      await ctx.runMutation(internal.accounts.save, { provider, tokens });
+      // exchangeCode's errors are built to be shown: no secret, code or token in them.
+      tokens = await exchangeCode(provider, cfg, code, Date.now());
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
+      await tell(chatId, `❌ ${reason}. Попробуйте ещё раз: «🔗 Аккаунты».`);
+      return { ok: false, title: "Не подключено", text: reason };
+    }
+    try {
+      await ctx.runMutation(internal.accounts.save, { provider, tokens });
+    } catch (e) {
+      // Convex errors may quote the arguments, i.e. the tokens: show and log none of it.
+      console.error("accounts.save failed", e instanceof Error ? e.name : "error");
+      const reason = `${name}: не удалось сохранить доступ`;
       await tell(chatId, `❌ ${reason}. Попробуйте ещё раз: «🔗 Аккаунты».`);
       return { ok: false, title: "Не подключено", text: reason };
     }
