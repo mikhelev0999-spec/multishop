@@ -49,6 +49,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubEnv("OWNER_TELEGRAM_ID", String(OWNER));
   vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", SECRET);
+  vi.stubEnv("ANTHROPIC_API_KEY", "test");
   vi.mocked(runAgent).mockResolvedValue({ kind: "draft", draft, comparables: [], costUsd: 0.12 });
 });
 afterEach(() => {

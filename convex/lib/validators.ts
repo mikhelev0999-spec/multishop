@@ -8,6 +8,8 @@ export const itemStatusValidator = v.union(
   v.literal("approved"),
   v.literal("cancelled"),
   v.literal("failed"),
+  /** Manual mode: waits for Claude in the chat to analyse it. */
+  v.literal("queued"),
 );
 export type ItemStatus = Infer<typeof itemStatusValidator>;
 

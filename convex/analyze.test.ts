@@ -40,9 +40,13 @@ const draft: Draft = {
   marketplaces: ["olx"],
 };
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.stubEnv("ANTHROPIC_API_KEY", "test");
+});
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 

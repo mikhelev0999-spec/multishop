@@ -27,7 +27,8 @@ export function formatDraft(d: Draft, costUsd: number): string {
     "",
   ].join("\n");
   const marketplaces = d.marketplaces.map((m) => MARKETPLACE_NAME[m]).join(", ");
-  const tail = `\n\nПлощадки: ${marketplaces} · анализ: $${costUsd.toFixed(2)}`;
+  const cost = costUsd === 0 ? "разбор вручную" : `анализ: $${costUsd.toFixed(2)}`;
+  const tail = `\n\nПлощадки: ${marketplaces} · ${cost}`;
   const room = Math.max(0, MAX_MESSAGE_LENGTH - head.length - tail.length - 1);
   const body = cut(d.descriptionUk, room);
   return cut(`${head}\n${body}${tail}`, MAX_MESSAGE_LENGTH);

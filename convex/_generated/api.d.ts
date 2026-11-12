@@ -20,11 +20,14 @@ import type * as lib_claude from "../lib/claude.js";
 import type * as lib_draftMessage from "../lib/draftMessage.js";
 import type * as lib_ebay from "../lib/ebay.js";
 import type * as lib_itemState from "../lib/itemState.js";
+import type * as lib_mode from "../lib/mode.js";
 import type * as lib_nbu from "../lib/nbu.js";
 import type * as lib_pricing from "../lib/pricing.js";
+import type * as lib_showDraft from "../lib/showDraft.js";
 import type * as lib_telegramApi from "../lib/telegramApi.js";
 import type * as lib_telegramUpdate from "../lib/telegramUpdate.js";
 import type * as lib_validators from "../lib/validators.js";
+import type * as manual from "../manual.js";
 import type * as telegram from "../telegram.js";
 
 import type {
@@ -46,11 +49,14 @@ declare const fullApi: ApiFromModules<{
   "lib/draftMessage": typeof lib_draftMessage;
   "lib/ebay": typeof lib_ebay;
   "lib/itemState": typeof lib_itemState;
+  "lib/mode": typeof lib_mode;
   "lib/nbu": typeof lib_nbu;
   "lib/pricing": typeof lib_pricing;
+  "lib/showDraft": typeof lib_showDraft;
   "lib/telegramApi": typeof lib_telegramApi;
   "lib/telegramUpdate": typeof lib_telegramUpdate;
   "lib/validators": typeof lib_validators;
+  manual: typeof manual;
   telegram: typeof telegram;
 }>;
 

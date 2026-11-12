@@ -1,12 +1,14 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { internalAction, type ActionCtx } from "./_generated/server";
+import { internalAction } from "./_generated/server";
 import { getUsdUah } from "./fx";
 import { runAgent, runRewrite, type AgentDeps } from "./lib/agent";
 import { createMessage } from "./lib/claude";
-import { draftKeyboard, formatDraft } from "./lib/draftMessage";
 import { searchByImage, searchByKeywords } from "./lib/ebay";
+import { isManualMode } from "./lib/mode";
+import { showDraft } from "./lib/showDraft";
+import { enqueueForChat } from "./manual";
 import * as telegram from "./lib/telegramApi";
 
 const deps: AgentDeps = { createMessage, searchByKeywords, searchByImage };
@@ -15,6 +17,10 @@ export const start = internalAction({
   args: { itemId: v.id("items"), photoAt: v.number() },
   returns: v.null(),
   handler: async (ctx, { itemId, photoAt }) => {
+    if (isManualMode()) {
+      await enqueueForChat(ctx, itemId, photoAt);
+      return null;
+    }
     const job = await ctx.runMutation(internal.items.beginAnalysis, { itemId, photoAt });
     if (!job) return null;
 
@@ -26,7 +32,7 @@ export const start = internalAction({
       await ctx.runMutation(internal.items.setStatusMessage, { itemId, messageId: statusId });
 
       const photos = await Promise.all(
-        job.photoIds.map(async (id) => {
+        job.photoIds.map(async (id: Id<"_storage">) => {
           const blob = await ctx.storage.get(id);
           if (!blob) throw new Error("фото пропало из хранилища");
           return { mediaType: blob.type || "image/jpeg", base64: toBase64(await blob.arrayBuffer()) };
@@ -101,30 +107,6 @@ export const show = internalAction({
     return null;
   },
 });
-
-/**
- * Shows the current draft with buttons. The first time it replaces the "Разбираюсь…"
- * message; later versions are sent anew (so they are at the bottom of the chat) and the
- * buttons are removed from the previous one.
- */
-async function showDraft(ctx: ActionCtx, itemId: Id<"items">): Promise<void> {
-  const item = await ctx.runQuery(internal.items.get, { itemId });
-  if (!item?.draft || item.status !== "draft") return;
-  const text = formatDraft(item.draft, item.costUsd);
-  const keyboard = draftKeyboard(itemId);
-
-  if (item.draftMessageId === undefined && item.statusMessageId !== undefined) {
-    await telegram.editMessageText(item.chatId, item.statusMessageId, text, keyboard);
-    await ctx.runMutation(internal.items.setDraftMessage, { itemId, messageId: item.statusMessageId });
-    return;
-  }
-  const messageId = await telegram.sendMessage(item.chatId, text, keyboard);
-  await ctx.runMutation(internal.items.setDraftMessage, { itemId, messageId });
-  if (item.draftMessageId !== undefined) {
-    // Best effort: an old message may already be gone.
-    await telegram.removeKeyboard(item.chatId, item.draftMessageId).catch(() => {});
-  }
-}
 
 function toBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);

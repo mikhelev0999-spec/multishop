@@ -53,3 +53,23 @@ npx convex run telegram:setWebhook
 ```
 
 Команда печатает адрес вебхука. После этого напишите боту `/start` и пришлите фото.
+
+## Ручной режим (без ключа Anthropic)
+
+Пока в Convex нет `ANTHROPIC_API_KEY`, бот ставит фото в очередь и пишет владельцу
+«Напишите Claude в чат „разбери“». Разбор делает Claude в сессии Claude Code:
+
+```bash
+npx convex run manual:queue
+```
+
+```bash
+npx convex run manual:submitDraft '{"itemId": "...", "draft": {"title_uk": "...", "description_uk": "...", "category": "...", "brand": "", "model": "", "condition": "good", "defects": [], "price_uah": 400, "price_usd": 10, "price_reasoning_ru": "...", "comparables_count": 0, "marketplaces": ["olx"]}}'
+```
+
+```bash
+npx convex run manual:ask '{"itemId": "...", "question": "..."}'
+```
+
+Тот же `submitDraft` выполняет запросы «Изменить текст» из `queue.rewrite`; цена при этом
+не меняется. Как только `ANTHROPIC_API_KEY` добавлен, бот разбирает фото сам.

@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import { copyText } from "./lib/draftMessage";
 import { clearAwaiting } from "./lib/itemState";
+import { isManualMode } from "./lib/mode";
 import { parsePrice } from "./lib/pricing";
 import * as telegramApi from "./lib/telegramApi";
 import { parseUpdate, type CallbackAction, type Incoming } from "./lib/telegramUpdate";
@@ -17,6 +18,8 @@ export const HELP_TEXT = [
 ].join("\n");
 
 const NOTHING_TO_DO = "Пришлите фото вещи, чтобы начать.";
+const MANUAL_REWRITE_QUEUED =
+  "Записал. Попросите Claude в чате: «перепиши» — новый текст придёт сюда.";
 const UNSUPPORTED_FILE =
   "Этот файл не подойдёт. Пришлите снимок как обычное фото (не файлом) — или файлом JPEG/PNG до 3,5 МБ.";
 const PRICE_PROMPT = "Напишите новую цену: «1500» — для OLX в гривнах, «$40» — для eBay.";
@@ -174,7 +177,10 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
   const textItem = await firstAwaiting(ctx, "text");
   if (textItem) {
     await ctx.db.patch(textItem._id, { awaiting: undefined });
-    if (textItem.status === "draft") {
+    if (textItem.status === "draft" && isManualMode()) {
+      await ctx.db.patch(textItem._id, { rewriteRequest: text });
+      await send(ctx, chatId, MANUAL_REWRITE_QUEUED);
+    } else if (textItem.status === "draft") {
       await send(ctx, chatId, "Переписываю…");
       await ctx.scheduler.runAfter(0, internal.analyze.rewrite, { itemId: textItem._id, instruction: text });
     } else {
@@ -199,7 +205,8 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
     return;
   }
 
-  const collecting = await latestWithStatus(ctx, "collecting");
+  const collecting =
+    (await latestWithStatus(ctx, "collecting")) ?? (await latestWithStatus(ctx, "queued"));
   if (collecting) {
     // A hint sent right after the photos: treat it like a caption.
     const caption = collecting.caption ? `${collecting.caption}\n${text}` : text;
@@ -267,7 +274,7 @@ async function setAwaiting(ctx: MutationCtx, itemId: Id<"items">, awaiting: "pri
   await ctx.db.patch(itemId, { awaiting });
 }
 
-function latestWithStatus(ctx: MutationCtx, status: "collecting" | "analyzing") {
+function latestWithStatus(ctx: MutationCtx, status: "collecting" | "queued" | "analyzing") {
   return ctx.db
     .query("items")
     .withIndex("by_status", (q) => q.eq("status", status))

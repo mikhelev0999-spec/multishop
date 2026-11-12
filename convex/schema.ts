@@ -23,12 +23,15 @@ export default defineSchema({
     statusMessageId: v.optional(v.number()),
     photoLimitNotified: v.optional(v.boolean()),
     analysisRun: v.optional(v.number()),
+    /** Manual mode: the owner's "what to change" waiting for Claude in the chat. */
+    rewriteRequest: v.optional(v.string()),
     costUsd: v.number(),
     error: v.optional(v.string()),
   })
     .index("by_media_group", ["mediaGroupId"])
     .index("by_status", ["status"])
-    .index("by_awaiting", ["awaiting"]),
+    .index("by_awaiting", ["awaiting"])
+    .index("by_rewrite_request", ["rewriteRequest"]),
   priceResearch: defineTable({
     itemId: v.id("items"),
     source: v.literal("ebay"),

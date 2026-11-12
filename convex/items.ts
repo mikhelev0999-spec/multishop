@@ -206,6 +206,7 @@ export const updateDraftText = internalMutation({
     const { priceUah, priceUsd, priceReasoningRu, comparablesCount } = item.draft;
     await ctx.db.patch(itemId, {
       draft: { ...draft, priceUah, priceUsd, priceReasoningRu, comparablesCount },
+      rewriteRequest: undefined,
       costUsd: item.costUsd + costUsd,
     });
     return null;
