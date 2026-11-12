@@ -11,12 +11,17 @@ vi.mock("../lib/telegram", () => ({
 }));
 vi.mock("../lib/studioApi", () => ({ loadItem: vi.fn(), saveProcessed: vi.fn() }));
 vi.mock("../lib/removeBackground", () => ({ removeBackground: vi.fn() }));
-vi.mock("../lib/compose", () => ({ composeOnBackground: vi.fn() }));
+vi.mock("../lib/compose", () => ({
+  composeOnBackground: vi.fn(),
+  prepareCutout: vi.fn(),
+  renderInto: vi.fn(),
+  PREVIEW_SIZE: 480,
+}));
 
 import { getInitData } from "../lib/telegram";
 import { loadItem, saveProcessed } from "../lib/studioApi";
 import { removeBackground } from "../lib/removeBackground";
-import { composeOnBackground } from "../lib/compose";
+import { composeOnBackground, prepareCutout, renderInto } from "../lib/compose";
 
 const item = {
   title: "Чоботи Chloé Betty",
@@ -35,6 +40,7 @@ beforeEach(() => {
   vi.mocked(composeOnBackground).mockImplementation(
     async (_b, settings) => new Blob([settings.background], { type: "image/jpeg" }),
   );
+  vi.mocked(prepareCutout).mockImplementation(async () => ({ pixels: {} as ImageData }));
   localStorage.clear();
   vi.mocked(saveProcessed).mockResolvedValue();
   // jsdom Blobs have no stream(), so new Response(blob) fails there.
@@ -84,19 +90,22 @@ test("processes the selected photos on the chosen background and saves them", as
 
   await screen.findByRole("button", { name: "Сохранить" });
   expect(removeBackground).toHaveBeenCalledTimes(2);
+  expect(prepareCutout).toHaveBeenCalledTimes(2);
+  expect(composeOnBackground).not.toHaveBeenCalled();
+  expect(screen.getByRole("img", { name: "После 1" }).tagName).toBe("CANVAS");
+
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() => expect(saveProcessed).toHaveBeenCalled());
   expect(vi.mocked(composeOnBackground).mock.calls.map((c) => c[1].background)).toEqual([
     "#efe6da",
     "#efe6da",
   ]);
-
-  await user.click(screen.getByRole("button", { name: "Сохранить" }));
-  await waitFor(() => expect(saveProcessed).toHaveBeenCalled());
   const [initData, itemId, blobs, keep] = vi.mocked(saveProcessed).mock.calls[0];
   expect([initData, itemId, blobs.length, keep]).toEqual(["signed", "item1", 2, []]);
   expect(await screen.findByText(/Готово/)).toBeInTheDocument();
 });
 
-test("changing the background after processing reuses the cut-outs", async () => {
+test("changing the background redraws the live preview, no model run, no full render", async () => {
   const user = userEvent.setup();
   renderStudio();
   await screen.findByText("Чоботи Chloé Betty");
@@ -104,12 +113,15 @@ test("changing the background after processing reuses the cut-outs", async () =>
   await screen.findByRole("button", { name: "Сохранить" });
   await user.click(screen.getByRole("button", { name: "Чёрный" }));
   await waitFor(() =>
-    expect(composeOnBackground).toHaveBeenLastCalledWith(
-      expect.any(Blob),
+    expect(renderInto).toHaveBeenLastCalledWith(
+      expect.any(HTMLCanvasElement),
+      expect.anything(),
       expect.objectContaining({ background: "#111111" }),
+      480,
     ),
   );
   expect(removeBackground).toHaveBeenCalledTimes(1);
+  expect(composeOnBackground).not.toHaveBeenCalled();
 });
 
 test("an error is shown as text", async () => {
@@ -179,22 +191,32 @@ test("quality settings: defaults are automatic, sliders redo the preview and are
   await screen.findByText("Чоботи Chloé Betty");
   await user.click(screen.getByRole("button", { name: "Обработать" }));
   await screen.findByRole("button", { name: "Сохранить" });
-  expect(vi.mocked(composeOnBackground).mock.calls[0][1]).toMatchObject({
-    auto: true,
-    sharpness: 30,
-    shadow: true,
-  });
+  await waitFor(() =>
+    expect(vi.mocked(renderInto).mock.calls.at(-1)?.[2]).toMatchObject({
+      auto: true,
+      sharpness: 30,
+      shadow: true,
+    }),
+  );
 
   await user.click(screen.getByText("Настройки качества"));
   fireEvent.change(screen.getByRole("slider", { name: /Резкость/ }), { target: { value: "70" } });
   await user.click(screen.getByRole("checkbox", { name: "Тень под вещью" }));
   await waitFor(() =>
-    expect(composeOnBackground).toHaveBeenLastCalledWith(
-      expect.any(Blob),
-      expect.objectContaining({ sharpness: 70, shadow: false }),
-    ),
+    expect(vi.mocked(renderInto).mock.calls.at(-1)?.[2]).toMatchObject({
+      sharpness: 70,
+      shadow: false,
+    }),
   );
   expect(removeBackground).toHaveBeenCalledTimes(1);
+
+  // The saved picture uses exactly what the preview showed.
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() => expect(saveProcessed).toHaveBeenCalled());
+  expect(vi.mocked(composeOnBackground).mock.calls[0][1]).toMatchObject({
+    sharpness: 70,
+    shadow: false,
+  });
   expect(JSON.parse(localStorage.getItem("multishop.studio.settings")!)).toMatchObject({
     sharpness: 70,
     shadow: false,

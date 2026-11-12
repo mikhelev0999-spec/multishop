@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ConvexError } from "convex/values";
 import { useSearchParams } from "react-router";
-import { composeOnBackground } from "../lib/compose";
+import {
+  composeOnBackground,
+  prepareCutout,
+  PREVIEW_SIZE,
+  renderInto,
+  type Prepared,
+} from "../lib/compose";
 import { removeBackground } from "../lib/removeBackground";
 import { loadItem, saveProcessed, type StudioItem } from "../lib/studioApi";
 import {
@@ -19,14 +25,12 @@ const BACKGROUNDS = [
   { name: "Чёрный", color: "#111111" },
 ];
 const MAX_PHOTOS = 10;
-/** Sliders and the colour picker fire on every move; recompose once they settle. */
-const RECOMPOSE_DELAY_MS = 300;
 
 interface Result {
   originalUrl: string;
   cutout: Blob;
-  output: Blob;
-  previewUrl: string;
+  /** Small cropped copy for the live preview; the full-size picture is made on save. */
+  preview: Prepared;
 }
 
 type Phase = "loading" | "ready" | "working" | "processed" | "saving" | "saved";
@@ -34,7 +38,6 @@ type Phase = "loading" | "ready" | "working" | "processed" | "saving" | "saved";
 // Server errors meant for the owner come as ConvexError data; anything else is shown as is.
 const message = (e: unknown) =>
   e instanceof ConvexError ? String(e.data) : e instanceof Error ? e.message : String(e);
-const revoke = (results: Result[]) => results.forEach((r) => URL.revokeObjectURL(r.previewUrl));
 
 export default function Studio() {
   const [params] = useSearchParams();
@@ -50,16 +53,6 @@ export default function Studio() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
-  // Latest values for async work, so a slow recompose never wins over a newer choice.
-  const resultsRef = useRef<Result[]>([]);
-  const generation = useRef(0);
-  // Settings the current previews were made with.
-  const composedWith = useRef("");
-
-  useEffect(() => {
-    resultsRef.current = results;
-  }, [results]);
-  useEffect(() => () => revoke(resultsRef.current), []);
   useEffect(() => saveSettings(settings), [settings]);
 
   useEffect(() => {
@@ -73,34 +66,6 @@ export default function Studio() {
       })
       .catch((e) => setError(message(e)));
   }, [initData, itemId]);
-
-  // Redo already processed photos when a setting changes, reusing the cut-outs (no model run).
-  useEffect(() => {
-    const key = JSON.stringify(settings);
-    if (phase !== "processed" || key === composedWith.current) return;
-    const gen = ++generation.current;
-    const timer = setTimeout(async () => {
-      const made: Result[] = [];
-      try {
-        for (const r of resultsRef.current) {
-          const output = await composeOnBackground(r.cutout, settings);
-          made.push({ ...r, output, previewUrl: URL.createObjectURL(output) });
-        }
-      } catch (e) {
-        revoke(made);
-        if (gen === generation.current) setError(message(e));
-        return;
-      }
-      if (gen !== generation.current) {
-        revoke(made);
-        return;
-      }
-      revoke(resultsRef.current);
-      composedWith.current = key;
-      setResults(made);
-    }, RECOMPOSE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [settings, phase]);
 
   const update = (patch: Partial<StudioSettings>) => setSettings((prev) => ({ ...prev, ...patch }));
 
@@ -146,21 +111,15 @@ export default function Studio() {
             );
           }
         });
-        setStatus(`Фото ${n + 1} из ${chosen.length}: собираю…`);
-        const output = await composeOnBackground(cutout, settings);
         out.push({
           originalUrl: photo.url,
           cutout,
-          output,
-          previewUrl: URL.createObjectURL(output),
+          preview: await prepareCutout(cutout, PREVIEW_SIZE),
         });
       }
-      revoke(resultsRef.current);
-      composedWith.current = JSON.stringify(settings);
       setResults(out);
       setPhase("processed");
     } catch (e) {
-      revoke(out);
       setError(message(e));
       setPhase("ready");
     } finally {
@@ -174,17 +133,20 @@ export default function Studio() {
     setError("");
     setPhase("saving");
     try {
-      await saveProcessed(
-        initData,
-        itemId,
-        results.map((r) => r.output),
-        [...keep],
-      );
+      const outputs: Blob[] = [];
+      for (const [n, r] of results.entries()) {
+        setStatus(`Готовлю фото ${n + 1} из ${results.length} в полном размере…`);
+        outputs.push(await composeOnBackground(r.cutout, settings));
+      }
+      setStatus("Сохраняю…");
+      await saveProcessed(initData, itemId, outputs, [...keep]);
       setPhase("saved");
       setTimeout(closeMiniApp, 1500);
     } catch (e) {
       setError(message(e));
       setPhase("processed");
+    } finally {
+      setStatus("");
     }
   }
 
@@ -382,10 +344,10 @@ export default function Studio() {
                       alt={`До ${i + 1}`}
                       className="aspect-square w-full rounded object-cover"
                     />
-                    <img
-                      src={r.previewUrl}
-                      alt={`После ${i + 1}`}
-                      className="aspect-square w-full rounded object-cover"
+                    <LivePreview
+                      prepared={r.preview}
+                      settings={settings}
+                      label={`После ${i + 1}`}
                     />
                   </li>
                 ))}
@@ -424,6 +386,28 @@ export default function Studio() {
       )}
       {!item && !error && <p>Загружаю…</p>}
     </Shell>
+  );
+}
+
+/** Redrawn on every settings change, at most once per animation frame. */
+function LivePreview(props: { prepared: Prepared; settings: StudioSettings; label: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const { prepared, settings } = props;
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      if (ref.current) renderInto(ref.current, prepared, settings, PREVIEW_SIZE);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [prepared, settings]);
+  return (
+    <canvas
+      ref={ref}
+      role="img"
+      aria-label={props.label}
+      className="aspect-square w-full rounded"
+      width={PREVIEW_SIZE}
+      height={PREVIEW_SIZE}
+    />
   );
 }
 
