@@ -1,4 +1,4 @@
-import { esc, uah } from "./botTexts";
+import { esc, short, uah } from "./botTexts";
 import type { Keyboard } from "./telegramApi";
 import type { Condition, Draft, Marketplace } from "./validators";
 
@@ -42,7 +42,7 @@ export function formatDraft(d: Draft, costUsd: number): string {
 }
 
 const cut = (text: string, max: number) =>
-  text.length <= max ? text : max <= 0 ? "" : `${text.slice(0, max - 1)}…`;
+  text.length <= max ? text : max <= 0 ? "" : short(text, max);
 
 /** Splits a long text into Telegram-sized parts, preferring line breaks. */
 export function splitMessage(text: string, max = MAX_MESSAGE_LENGTH): string[] {

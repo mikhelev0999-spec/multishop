@@ -8,6 +8,7 @@ vi.mock("../lib/telegram", () => ({
   getInitData: vi.fn(() => "signed"),
   startMiniApp: vi.fn(),
   closeMiniApp: vi.fn(),
+  haptic: vi.fn(),
 }));
 vi.mock("../lib/studioApi", () => ({ loadItem: vi.fn(), saveProcessed: vi.fn() }));
 vi.mock("../lib/removeBackground", () => ({ removeBackground: vi.fn() }));

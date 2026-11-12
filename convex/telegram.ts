@@ -3,15 +3,15 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import {
-  adjustPrice,
   esc,
   itemCard,
   itemsList,
   listedKeyboard,
   MAX_LISTED_ITEMS,
   NEW_ITEM_TEXT,
-  PRICE_STEPS,
+  MAX_PRICE_UAH,
   priceKeyboard,
+  relistKeyboard,
   soldKeyboard,
   START_TEXT,
   statsText,
@@ -191,12 +191,14 @@ async function handleCommand(ctx: MutationCtx, chatId: number, command: Command)
       await send(ctx, chatId, START_TEXT, { html: true, menu: true });
       return;
     case "help":
-      await send(ctx, chatId, START_TEXT, { html: true });
+      await send(ctx, chatId, START_TEXT, { html: true, menu: true });
       return;
     case "new":
+      await clearAwaiting(ctx);
       await send(ctx, chatId, NEW_ITEM_TEXT);
       return;
     case "items": {
+      await clearAwaiting(ctx);
       const recent = await ctx.db
         .query("items")
         .order("desc")
@@ -207,6 +209,7 @@ async function handleCommand(ctx: MutationCtx, chatId: number, command: Command)
       return;
     }
     case "stats":
+      await clearAwaiting(ctx);
       await send(ctx, chatId, statsText(await collectStats(ctx)), { html: true });
       return;
   }
@@ -327,7 +330,7 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
     return;
   }
 
-  await send(ctx, chatId, NOTHING_TO_DO);
+  await send(ctx, chatId, NOTHING_TO_DO, { menu: true });
 }
 
 /** Which buttons work in which item status; anything else is an old button. */
@@ -342,6 +345,7 @@ const ALLOWED: Record<CallbackAction, ItemStatus[]> = {
   soldat: ["approved"],
   again: ["approved"],
   unlist: ["approved"],
+  relist: ["sold", "cancelled"],
   open: ["collecting", "queued", "analyzing", "needs_input", "draft", "approved", "sold", "failed"],
 };
 
@@ -354,20 +358,32 @@ async function handleCallback(ctx: MutationCtx, cb: Extract<Incoming, { kind: "c
 
   const itemId = ctx.db.normalizeId("items", cb.itemId);
   const item = itemId ? await ctx.db.get(itemId) : null;
-  if (!item || !ALLOWED[cb.action].includes(item.status)) {
+  // Only items that were on sale can go back on sale (not cancelled drafts).
+  const relistable = cb.action !== "relist" || item?.listedAt !== undefined;
+  if (!item || !ALLOWED[cb.action].includes(item.status) || !relistable) {
     await answer("Эта вещь уже обработана");
     return;
   }
   const toast = await ACTIONS[cb.action](ctx, item, cb.arg);
+  if (FINISHING.has(cb.action)) {
+    // The pressed message's buttons are done; leaving them invites stale presses.
+    await ctx.scheduler.runAfter(0, internal.bot.removeKeyboard, {
+      chatId: cb.chatId,
+      messageId: cb.messageId,
+    });
+  }
   await answer(toast ?? undefined);
 }
+
+/** Buttons whose message has nothing more to offer once pressed. */
+const FINISHING = new Set<CallbackAction>(["pr", "soldat", "unlist", "relist"]);
 
 type Action = (ctx: MutationCtx, item: Doc<"items">, arg?: string) => Promise<string | void>;
 
 const ACTIONS: Record<CallbackAction, Action> = {
   publish: async (ctx, item) => {
     const draft = item.draft!;
-    await ctx.db.patch(item._id, { status: "approved", awaiting: undefined });
+    await ctx.db.patch(item._id, { status: "approved", awaiting: undefined, listedAt: Date.now() });
     await removeButtons(ctx, item);
     // One action, so the photos arrive after the text and the card comes last.
     await ctx.scheduler.runAfter(0, internal.bot.sendWithPhotos, {
@@ -388,9 +404,10 @@ const ACTIONS: Record<CallbackAction, Action> = {
     });
   },
   pr: async (ctx, item, arg) => {
-    const percent = Number(arg);
-    if (!(PRICE_STEPS as readonly number[]).includes(percent)) return "Неизвестная кнопка";
-    const priceUah = adjustPrice(item.draft!.priceUah, percent);
+    const priceUah = Number(arg);
+    if (!Number.isInteger(priceUah) || priceUah <= 0 || priceUah > MAX_PRICE_UAH) {
+      return "Неизвестная кнопка";
+    }
     await ctx.db.patch(item._id, { draft: { ...item.draft!, priceUah }, awaiting: undefined });
     await ctx.scheduler.runAfter(0, internal.analyze.show, { itemId: item._id });
     return `Цена: ${uah(priceUah)}`;
@@ -453,8 +470,30 @@ const ACTIONS: Record<CallbackAction, Action> = {
       `🗑 <b>${esc(item.draft?.titleUk ?? "Вещь")}</b> снята с продажи.`,
       {
         html: true,
+        keyboard: relistKeyboard(item._id),
       },
     );
+  },
+  relist: async (ctx, item) => {
+    await ctx.db.patch(item._id, {
+      status: "approved",
+      soldPriceUah: undefined,
+      soldAt: undefined,
+      awaiting: undefined,
+    });
+    const back = { ...item, status: "approved" as const, soldPriceUah: undefined };
+    await send(
+      ctx,
+      item.chatId,
+      `↩️ Снова в продаже
+
+${itemCard(back)}`,
+      {
+        html: true,
+        keyboard: listedKeyboard(item._id),
+      },
+    );
+    return "Снова в продаже";
   },
 };
 
@@ -465,14 +504,28 @@ async function markSold(ctx: MutationCtx, item: Doc<"items">, priceUah: number) 
     soldAt: Date.now(),
     awaiting: undefined,
   });
-  const stats = await collectStats(ctx);
-  await send(
-    ctx,
-    item.chatId,
-    `🎉 Продано за <b>${uah(priceUah)}</b>!\nВсего продано: ${stats.sold} на ${uah(stats.soldSum)}.`,
-    { html: true },
-  );
+  // The running total is counted in its own transaction, so it can never block recording the sale.
+  await ctx.scheduler.runAfter(0, internal.telegram.soldSummary, {
+    chatId: item.chatId,
+    itemId: item._id,
+    priceUah,
+  });
 }
+
+export const soldSummary = internalMutation({
+  args: { chatId: v.number(), itemId: v.id("items"), priceUah: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { chatId, itemId, priceUah }) => {
+    const stats = await collectStats(ctx);
+    await send(
+      ctx,
+      chatId,
+      `🎉 Продано за <b>${uah(priceUah)}</b>!\nВсего продано: ${stats.sold} на ${uah(stats.soldSum)}.`,
+      { html: true, keyboard: relistKeyboard(itemId) },
+    );
+    return null;
+  },
+});
 
 async function removeButtons(ctx: MutationCtx, item: Doc<"items">) {
   if (item.draftMessageId !== undefined) {

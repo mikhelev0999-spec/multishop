@@ -47,16 +47,28 @@ export function adjustPrice(price: number, percent: number): number {
 
 export const PRICE_STEPS = [-10, -5, 5, 10] as const;
 
+/**
+ * Each button carries the resulting price, so pressing it sets exactly what its label says,
+ * even on an old message or twice in a row. Steps that wouldn't change the price are left out.
+ */
 export function priceKeyboard(itemId: string, price: number): Keyboard {
-  const button = (p: number) => ({
-    text: `${p > 0 ? "+" : "−"}${Math.abs(p)}% → ${uah(adjustPrice(price, p))}`,
-    callbackData: `pr:${itemId}:${p}`,
-  });
-  return [
-    [button(-10), button(-5)],
-    [button(5), button(10)],
-    [{ text: "✍️ Ввести свою цену", callbackData: `prc:${itemId}` }],
-  ];
+  const buttons = PRICE_STEPS.map((p) => ({ p, target: adjustPrice(price, p) }))
+    .filter(({ target }) => target !== price)
+    .map(({ p, target }) => ({
+      text: `${p > 0 ? "+" : "−"}${Math.abs(p)}% → ${uah(target)}`,
+      callbackData: `pr:${itemId}:${target}`,
+    }));
+  const rows: Keyboard = [];
+  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i + 2));
+  rows.push([{ text: "✍️ Ввести свою цену", callbackData: `prc:${itemId}` }]);
+  return rows;
+}
+
+/** Upper bound for a price set by a button: anything above is a forged or broken callback. */
+export const MAX_PRICE_UAH = 10_000_000;
+
+export function relistKeyboard(itemId: string): Keyboard {
+  return [[{ text: "↩️ Вернуть в продажу", callbackData: `relist:${itemId}` }]];
 }
 
 export function listedKeyboard(itemId: string): Keyboard {
@@ -127,4 +139,8 @@ export function statsText(s: Stats): string {
   ].join("\n");
 }
 
-const short = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, max - 1)}…`);
+/** Cuts by characters, not UTF-16 units, so an emoji is never split in half. */
+export function short(s: string, max: number): string {
+  const chars = Array.from(s);
+  return chars.length <= max ? s : `${chars.slice(0, Math.max(0, max - 1)).join("")}…`;
+}

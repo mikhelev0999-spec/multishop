@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { Doc, Id } from "../_generated/dataModel";
 import {
   adjustPrice,
+  short,
   esc,
   itemCard,
   itemsList,
@@ -56,23 +57,23 @@ describe("adjustPrice", () => {
 test("price keyboard shows the resulting prices", () => {
   expect(priceKeyboard("i1", 2200)).toEqual([
     [
-      { text: "−10% → 2 000 грн", callbackData: "pr:i1:-10" },
-      { text: "−5% → 2 100 грн", callbackData: "pr:i1:-5" },
+      { text: "−10% → 2 000 грн", callbackData: "pr:i1:2000" },
+      { text: "−5% → 2 100 грн", callbackData: "pr:i1:2100" },
     ],
     [
-      { text: "+5% → 2 300 грн", callbackData: "pr:i1:5" },
-      { text: "+10% → 2 400 грн", callbackData: "pr:i1:10" },
+      { text: "+5% → 2 300 грн", callbackData: "pr:i1:2300" },
+      { text: "+10% → 2 400 грн", callbackData: "pr:i1:2400" },
     ],
     [{ text: "✍️ Ввести свою цену", callbackData: "prc:i1" }],
   ]);
 });
 
 test("listed and sold keyboards", () => {
-  expect(listedKeyboard("i1").flat().map((b) => (b as { callbackData: string }).callbackData)).toEqual([
-    "sold:i1",
-    "again:i1",
-    "unlist:i1",
-  ]);
+  expect(
+    listedKeyboard("i1")
+      .flat()
+      .map((b) => (b as { callbackData: string }).callbackData),
+  ).toEqual(["sold:i1", "again:i1", "unlist:i1"]);
   expect(soldKeyboard("i1", 2200)).toEqual([
     [{ text: "💵 За 2 200 грн, как в объявлении", callbackData: "soldat:i1" }],
   ]);
@@ -85,7 +86,10 @@ test("item card: escaped title, status, price, sale price", () => {
 });
 
 test("items list: one line and one open button per item", () => {
-  const { text, keyboard } = itemsList([item({}), item({ _id: "i2" as Id<"items">, status: "approved" })]);
+  const { text, keyboard } = itemsList([
+    item({}),
+    item({ _id: "i2" as Id<"items">, status: "approved" }),
+  ]);
   expect(text).toContain("<b>📦 Мои вещи</b> (последние 2)");
   expect(text).toContain("📝 Светр &lt;FTC&gt; — 2 200 грн");
   expect(text).toContain("🛒 Светр &lt;FTC&gt; — 2 200 грн");
@@ -109,4 +113,16 @@ test("stats text", () => {
       "📝 Черновиков: <b>1</b>",
     ].join("\n"),
   );
+});
+
+test("price steps that would not change a tiny price are hidden", () => {
+  const kb = priceKeyboard("i1", 10);
+  const labels = kb.flat().map((b) => b.text);
+  expect(labels.some((l) => l.includes("−5%"))).toBe(false);
+  expect(labels.at(-1)).toBe("✍️ Ввести свою цену");
+});
+
+test("short never splits an emoji", () => {
+  expect(short("ab😀cd", 4)).toBe("ab😀…");
+  expect(short("ab😀", 5)).toBe("ab😀");
 });

@@ -489,6 +489,11 @@ describe("menu and items", () => {
   });
 });
 
+const prButton = (id: string, target: number) => {
+  const b = button("pr", id);
+  return { ...b, callback_query: { ...b.callback_query, data: `pr:${id}:${target}` } };
+};
+
 describe("price buttons", () => {
   test("«💰 Цена» offers steps; a step changes the price and re-shows the draft", async () => {
     const t = convexTest(schema, modules);
@@ -496,10 +501,7 @@ describe("price buttons", () => {
     await deliver(t, button("price", id));
     expect(sentTexts()[0]).toContain("Сейчас: <b>4 500 грн</b>");
     vi.clearAllMocks();
-    await deliver(t, {
-      ...button("pr", id),
-      callback_query: { ...button("pr", id).callback_query, data: `pr:${id}:-10` },
-    });
+    await deliver(t, prButton(id, 4050));
     expect((await items(t))[0].draft?.priceUah).toBe(4050);
     expect(tg.answerCallbackQuery).toHaveBeenCalledWith(expect.any(String), "Цена: 4 050 грн");
     expect(sentTexts()[0]).toContain("4 050 грн");
@@ -508,10 +510,7 @@ describe("price buttons", () => {
   test("an unknown step is refused", async () => {
     const t = convexTest(schema, modules);
     const id = await draftItem(t);
-    await deliver(t, {
-      ...button("pr", id),
-      callback_query: { ...button("pr", id).callback_query, data: `pr:${id}:-90` },
-    });
+    await deliver(t, prButton(id, -90));
     expect((await items(t))[0].draft?.priceUah).toBe(4500);
   });
 });
@@ -580,5 +579,47 @@ describe("after publishing", () => {
     const [, txt, keyboard] = vi.mocked(tg.sendMessage).mock.calls[0];
     expect(txt).toContain("🛒 выставлено");
     expect(keyboard?.[0][0]).toMatchObject({ callbackData: `sold:${id}` });
+  });
+});
+
+describe("review fixes 1c", () => {
+  test("a price button sets what its label says, also when pressed twice; its buttons go away", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, prButton(id, 4050), prButton(id, 4050));
+    expect((await items(t))[0].draft?.priceUah).toBe(4050);
+    expect(tg.removeKeyboard).toHaveBeenCalledWith(CHAT, 500);
+  });
+
+  test("a sold item can go back on sale", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, button("publish", id), button("soldat", id));
+    expect(sentTexts().at(-1)).toContain("🎉 Продано");
+    await deliver(t, button("relist", id));
+    const [item] = await items(t);
+    expect(item.status).toBe("approved");
+    expect(item.soldPriceUah).toBeUndefined();
+  });
+
+  test("a cancelled draft that was never listed can't be relisted", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, button("cancel", id), button("relist", id));
+    expect((await items(t))[0].status).toBe("cancelled");
+    expect(tg.answerCallbackQuery).toHaveBeenLastCalledWith(
+      expect.any(String),
+      "Эта вещь уже обработана",
+    );
+  });
+
+  test("help shows the menu; a menu button drops a pending reply", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, button("publish", id), button("sold", id));
+    vi.clearAllMocks();
+    await deliver(t, msg({ text: "❓ Помощь" }), msg({ text: "📸 Новая вещь" }));
+    expect(vi.mocked(tg.sendMessage).mock.calls[0][3]).toEqual({ html: true, menu: true });
+    expect((await items(t))[0].awaiting).toBeUndefined();
   });
 });

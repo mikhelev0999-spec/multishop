@@ -12,6 +12,7 @@ export const CALLBACK_ACTIONS = [
   "soldat",
   "again",
   "unlist",
+  "relist",
 ] as const;
 export type CallbackAction = (typeof CALLBACK_ACTIONS)[number];
 

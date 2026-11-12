@@ -5,6 +5,12 @@ interface WebApp {
   ready(): void;
   expand(): void;
   close(): void;
+  setHeaderColor?(color: string): void;
+  setBackgroundColor?(color: string): void;
+  HapticFeedback?: {
+    notificationOccurred(type: "success" | "error" | "warning"): void;
+    selectionChanged(): void;
+  };
 }
 
 function webApp(): WebApp | undefined {
@@ -17,10 +23,29 @@ export function getInitData(): string {
 }
 
 export function startMiniApp(): void {
-  webApp()?.ready();
-  webApp()?.expand();
+  const app = webApp();
+  app?.ready();
+  app?.expand();
+  // Blend the Telegram header with the page background. Older clients lack these.
+  try {
+    app?.setHeaderColor?.("secondary_bg_color");
+    app?.setBackgroundColor?.("secondary_bg_color");
+  } catch {
+    // Not supported by this Telegram version.
+  }
 }
 
 export function closeMiniApp(): void {
   webApp()?.close();
+}
+
+/** A short vibration on phones that support it. */
+export function haptic(kind: "success" | "error" | "select"): void {
+  try {
+    const h = webApp()?.HapticFeedback;
+    if (kind === "select") h?.selectionChanged();
+    else h?.notificationOccurred(kind);
+  } catch {
+    // Not supported by this Telegram version.
+  }
 }

@@ -11,6 +11,8 @@ import { showDraft } from "./lib/showDraft";
 import { enqueueForChat } from "./manual";
 import * as telegram from "./lib/telegramApi";
 
+const TYPING_REFRESH_MS = 4000;
+
 const deps: AgentDeps = { createMessage, searchByKeywords, searchByImage };
 
 export const start = internalAction({
@@ -25,23 +27,35 @@ export const start = internalAction({
     if (!job) return null;
 
     let statusId: number | undefined;
+    let typingTimer: ReturnType<typeof setInterval> | undefined;
     // Once the outcome is stored, a failure to show it must not turn the item into "failed".
     let saved = false;
     try {
-      statusId = await telegram.sendMessage(job.chatId, `Разбираюсь… (фото: ${job.photoIds.length})`);
+      statusId = await telegram.sendMessage(
+        job.chatId,
+        `Разбираюсь… (фото: ${job.photoIds.length})`,
+      );
       await ctx.runMutation(internal.items.setStatusMessage, { itemId, messageId: statusId });
-      // "typing…" while Claude looks at the photos; purely cosmetic.
-      await telegram.sendChatAction(job.chatId, "typing").catch(() => {});
+      // "typing…" while Claude looks at the photos; Telegram shows it for ~5 s, so repeat it.
+      const typing = () => telegram.sendChatAction(job.chatId, "typing").catch(() => {});
+      await typing();
+      typingTimer = setInterval(typing, TYPING_REFRESH_MS);
 
       const photos = await Promise.all(
         job.photoIds.map(async (id: Id<"_storage">) => {
           const blob = await ctx.storage.get(id);
           if (!blob) throw new Error("фото пропало из хранилища");
-          return { mediaType: blob.type || "image/jpeg", base64: toBase64(await blob.arrayBuffer()) };
+          return {
+            mediaType: blob.type || "image/jpeg",
+            base64: toBase64(await blob.arrayBuffer()),
+          };
         }),
       );
       const usdUah = await getUsdUah(ctx);
-      const result = await runAgent({ photos, caption: job.caption, answers: job.answers, usdUah }, deps);
+      const result = await runAgent(
+        { photos, caption: job.caption, answers: job.answers, usdUah },
+        deps,
+      );
 
       if (result.kind === "question") {
         await ctx.runMutation(internal.items.saveQuestion, {
@@ -69,10 +83,13 @@ export const start = internalAction({
         ? `Черновик готов, но Telegram не принял сообщение: ${message}`
         : `Не получилось разобрать: ${message}\nПришлите фото ещё раз.`;
       // Best effort: if Telegram itself is down, the owner can't be told anything.
-      await (statusId === undefined
-        ? telegram.sendMessage(job.chatId, text)
-        : telegram.editMessageText(job.chatId, statusId, text)
+      await (
+        statusId === undefined
+          ? telegram.sendMessage(job.chatId, text)
+          : telegram.editMessageText(job.chatId, statusId, text)
       ).catch((err) => console.error("could not report", err));
+    } finally {
+      clearInterval(typingTimer);
     }
     return null;
   },

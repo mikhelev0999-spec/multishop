@@ -1,1 +1,40 @@
 @import "tailwindcss";
+
+/*
+ * Telegram passes the user's theme as CSS variables (telegram-web-app.js); outside Telegram the
+ * fallbacks give a light, iOS-like look.
+ */
+:root {
+  --tg-bg: var(--tg-theme-bg-color, #ffffff);
+  --tg-secondary: var(--tg-theme-secondary-bg-color, #f2f2f7);
+  --tg-section: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+  --tg-text: var(--tg-theme-text-color, #000000);
+  --tg-hint: var(--tg-theme-hint-color, #8e8e93);
+  --tg-accent: var(--tg-theme-button-color, #2481cc);
+  --tg-accent-text: var(--tg-theme-button-text-color, #ffffff);
+  --tg-separator: var(--tg-theme-section-separator-color, rgba(0, 0, 0, 0.08));
+  --tg-destructive: var(--tg-theme-destructive-text-color, #e53935);
+}
+
+@theme inline {
+  --color-tg-bg: var(--tg-bg);
+  --color-tg-secondary: var(--tg-secondary);
+  --color-tg-section: var(--tg-section);
+  --color-tg-text: var(--tg-text);
+  --color-tg-hint: var(--tg-hint);
+  --color-tg-accent: var(--tg-accent);
+  --color-tg-accent-text: var(--tg-accent-text);
+  --color-tg-separator: var(--tg-separator);
+  --color-tg-destructive: var(--tg-destructive);
+}
+
+body {
+  background: var(--tg-secondary);
+  color: var(--tg-text);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input[type="range"] {
+  accent-color: var(--tg-accent);
+}

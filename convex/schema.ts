@@ -27,6 +27,7 @@ export default defineSchema({
     analysisRun: v.optional(v.number()),
     /** Manual mode: the owner's "what to change" waiting for Claude in the chat. */
     rewriteRequest: v.optional(v.string()),
+    listedAt: v.optional(v.number()),
     soldPriceUah: v.optional(v.number()),
     soldAt: v.optional(v.number()),
     costUsd: v.number(),
