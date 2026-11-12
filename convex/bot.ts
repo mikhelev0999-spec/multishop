@@ -12,12 +12,25 @@ const buttonValidator = v.union(
 const keyboardValidator = v.array(v.array(buttonValidator));
 
 export const send = internalAction({
-  args: { chatId: v.number(), text: v.string(), keyboard: v.optional(keyboardValidator) },
+  args: {
+    chatId: v.number(),
+    text: v.string(),
+    keyboard: v.optional(keyboardValidator),
+    /** Text is Telegram HTML; such texts are built to fit one message. */
+    html: v.optional(v.boolean()),
+    /** Show the persistent menu under the message box. */
+    menu: v.optional(v.boolean()),
+  },
   returns: v.null(),
-  handler: async (_ctx, { chatId, text, keyboard }) => {
+  handler: async (_ctx, { chatId, text, keyboard, html, menu }) => {
+    if (html) {
+      await telegram.sendMessage(chatId, text, keyboard, { html: true, menu });
+      return null;
+    }
     const parts = splitMessage(text);
     for (const [i, part] of parts.entries()) {
-      await telegram.sendMessage(chatId, part, i === parts.length - 1 ? keyboard : undefined);
+      const last = i === parts.length - 1;
+      await telegram.sendMessage(chatId, part, last ? keyboard : undefined, { menu: last && menu });
     }
     return null;
   },
@@ -56,7 +69,11 @@ export const sendPhotos = internalAction({
 });
 
 /** An album fails as a whole if Telegram can't fetch one photo; tell the owner instead of failing silently. */
-async function sendAlbum(ctx: ActionCtx, chatId: number, storageIds: Id<"_storage">[]): Promise<void> {
+async function sendAlbum(
+  ctx: ActionCtx,
+  chatId: number,
+  storageIds: Id<"_storage">[],
+): Promise<void> {
   const urls = await Promise.all(storageIds.map((id) => ctx.storage.getUrl(id)));
   try {
     await telegram.sendMediaGroup(
@@ -73,11 +90,18 @@ async function sendAlbum(ctx: ActionCtx, chatId: number, storageIds: Id<"_storag
 }
 
 export const sendWithPhotos = internalAction({
-  args: { chatId: v.number(), text: v.string(), storageIds: v.array(v.id("_storage")) },
+  args: {
+    chatId: v.number(),
+    text: v.string(),
+    storageIds: v.array(v.id("_storage")),
+    /** An HTML message with buttons sent after the album. */
+    footer: v.optional(v.object({ text: v.string(), keyboard: keyboardValidator })),
+  },
   returns: v.null(),
-  handler: async (ctx, { chatId, text, storageIds }) => {
+  handler: async (ctx, { chatId, text, storageIds, footer }) => {
     for (const part of splitMessage(text)) await telegram.sendMessage(chatId, part);
     await sendAlbum(ctx, chatId, storageIds);
+    if (footer) await telegram.sendMessage(chatId, footer.text, footer.keyboard, { html: true });
     return null;
   },
 });

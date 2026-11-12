@@ -1,7 +1,21 @@
-export const CALLBACK_ACTIONS = ["publish", "price", "text", "cancel"] as const;
+import { MENU_BUTTONS, type MenuCommand } from "./menu";
+
+export const CALLBACK_ACTIONS = [
+  "publish",
+  "price",
+  "pr",
+  "prc",
+  "text",
+  "cancel",
+  "open",
+  "sold",
+  "soldat",
+  "again",
+  "unlist",
+] as const;
 export type CallbackAction = (typeof CALLBACK_ACTIONS)[number];
 
-export const COMMANDS = ["start", "help"] as const;
+export const COMMANDS = ["start", "help", "items", "stats", "new"] as const;
 export type Command = (typeof COMMANDS)[number];
 
 interface Base {
@@ -32,6 +46,8 @@ export type Incoming =
       messageId: number;
       action: CallbackAction;
       itemId: string;
+      /** Optional third part of callback_data, e.g. the percent of "pr:<id>:-10". */
+      arg?: string;
     })
   | { kind: "ignored"; updateId: number };
 
@@ -79,6 +95,10 @@ function parseMessage(updateId: number, m: Obj): Incoming | null {
   }
   const text = str(m.text)?.trim();
   if (!text) return null;
+  const menu = (Object.entries(MENU_BUTTONS) as [MenuCommand, string][]).find(
+    ([, label]) => label === text,
+  );
+  if (menu) return { kind: "command", ...base, command: menu[0] };
   if (text.startsWith("/")) {
     const command = text.slice(1).split(/[\s@]/)[0];
     return (COMMANDS as readonly string[]).includes(command)
@@ -100,9 +120,11 @@ function parseCallback(updateId: number, q: Obj): Incoming | null {
     callbackId === undefined ||
     chatId === undefined ||
     messageId === undefined ||
-    parts.length !== 2 ||
+    parts.length < 2 ||
+    parts.length > 3 ||
     !(CALLBACK_ACTIONS as readonly string[]).includes(parts[0]) ||
-    parts[1] === ""
+    parts[1] === "" ||
+    parts[2] === ""
   ) {
     return null;
   }
@@ -115,5 +137,6 @@ function parseCallback(updateId: number, q: Obj): Incoming | null {
     messageId,
     action: parts[0] as CallbackAction,
     itemId: parts[1],
+    ...(parts[2] !== undefined ? { arg: parts[2] } : {}),
   };
 }

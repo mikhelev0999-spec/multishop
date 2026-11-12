@@ -4,7 +4,9 @@ import {
   editMessageText,
   getFileBytes,
   removeKeyboard,
+  sendChatAction,
   sendMediaGroup,
+  setMyCommands,
   sendMessage,
   setWebhook,
 } from "./telegramApi";
@@ -22,7 +24,9 @@ afterEach(() => {
 });
 
 const ok = (result: unknown) =>
-  new Response(JSON.stringify({ ok: true, result }), { headers: { "content-type": "application/json" } });
+  new Response(JSON.stringify({ ok: true, result }), {
+    headers: { "content-type": "application/json" },
+  });
 
 function lastCall() {
   const [url, init] = fetchMock.mock.calls.at(-1)!;
@@ -124,7 +128,53 @@ test("setWebhook sends the secret and allowed updates", async () => {
 
 test("ok:false becomes an error with Telegram's description", async () => {
   fetchMock.mockResolvedValueOnce(
-    new Response(JSON.stringify({ ok: false, description: "Bad Request: chat not found" }), { status: 400 }),
+    new Response(JSON.stringify({ ok: false, description: "Bad Request: chat not found" }), {
+      status: 400,
+    }),
   );
   await expect(sendMessage(1, "x")).rejects.toThrow("chat not found");
+});
+
+test("html messages carry parse_mode and no link previews", async () => {
+  fetchMock.mockResolvedValueOnce(ok({ message_id: 9 }));
+  await sendMessage(1, "<b>hi</b>", undefined, { html: true });
+  expect(lastCall().body).toEqual({
+    chat_id: 1,
+    text: "<b>hi</b>",
+    parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
+  });
+});
+
+test("menu option shows the persistent reply keyboard", async () => {
+  fetchMock.mockResolvedValueOnce(ok({ message_id: 9 }));
+  await sendMessage(1, "Меню", undefined, { menu: true });
+  expect(lastCall().body.reply_markup).toEqual({
+    keyboard: [
+      [{ text: "📸 Новая вещь" }, { text: "📦 Мои вещи" }],
+      [{ text: "📊 Статистика" }, { text: "❓ Помощь" }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  });
+});
+
+test("sendChatAction and setMyCommands", async () => {
+  fetchMock.mockImplementation(async () => ok(true));
+  await sendChatAction(1, "typing");
+  expect(lastCall()).toEqual({
+    url: "https://api.telegram.org/botTOKEN/sendChatAction",
+    body: { chat_id: 1, action: "typing" },
+  });
+  await setMyCommands([{ command: "items", description: "Мои вещи" }]);
+  expect(lastCall().body).toEqual({ commands: [{ command: "items", description: "Мои вещи" }] });
+});
+
+test("a network error does not leak the bot token", async () => {
+  fetchMock.mockRejectedValueOnce(
+    new TypeError("error sending request for url (https://api.telegram.org/botTOKEN/sendMessage)"),
+  );
+  const err = await sendMessage(1, "x").catch((e: Error) => e);
+  expect(String(err)).toContain("sendMessage: network error");
+  expect(String(err)).not.toContain("TOKEN");
 });

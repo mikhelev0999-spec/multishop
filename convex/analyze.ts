@@ -30,6 +30,8 @@ export const start = internalAction({
     try {
       statusId = await telegram.sendMessage(job.chatId, `Разбираюсь… (фото: ${job.photoIds.length})`);
       await ctx.runMutation(internal.items.setStatusMessage, { itemId, messageId: statusId });
+      // "typing…" while Claude looks at the photos; purely cosmetic.
+      await telegram.sendChatAction(job.chatId, "typing").catch(() => {});
 
       const photos = await Promise.all(
         job.photoIds.map(async (id: Id<"_storage">) => {

@@ -1,3 +1,4 @@
+import { esc, uah } from "./botTexts";
 import type { Keyboard } from "./telegramApi";
 import type { Condition, Draft, Marketplace } from "./validators";
 
@@ -12,26 +13,32 @@ const CONDITION_RU: Record<Condition, string> = {
 };
 const MARKETPLACE_NAME: Record<Marketplace, string> = { olx: "OLX", ebay: "eBay" };
 
-const groupThousands = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+/** Telegram counts the 4096-character limit on the text after markup is parsed. */
+const visibleLength = (html: string) =>
+  html.replace(/<[^>]+>/g, "").replace(/&(amp|lt|gt);/g, "x").length;
 
+/** The draft as Telegram HTML: title, prices, condition, reasoning, description in a quote. */
 export function formatDraft(d: Draft, costUsd: number): string {
-  const prices = d.marketplaces.includes("ebay")
-    ? `💰 ${groupThousands(d.priceUah)} грн (eBay: $${d.priceUsd})`
-    : `💰 ${groupThousands(d.priceUah)} грн`;
-  const defects = d.defects.length ? d.defects.join(", ") : "не видно";
+  const ebay = d.marketplaces.includes("ebay") ? ` · eBay <b>$${d.priceUsd}</b>` : "";
+  const reasoning =
+    d.comparablesCount > 0
+      ? `${esc(d.priceReasoningRu)} (аналогов: ${d.comparablesCount})`
+      : esc(d.priceReasoningRu);
   const head = [
-    `📦 ${d.titleUk}`,
-    prices,
-    `Состояние: ${CONDITION_RU[d.condition]} · Дефекты: ${defects}`,
-    `Почему такая цена: ${d.priceReasoningRu} (аналогов: ${d.comparablesCount})`,
+    `<b>📦 ${esc(d.titleUk)}</b>`,
+    "",
+    `💰 <b>${uah(d.priceUah)}</b>${ebay}`,
+    `🏷 Состояние: ${CONDITION_RU[d.condition]}`,
+    d.defects.length ? `⚠️ Дефекты: ${esc(d.defects.join(", "))}` : "✨ Дефектов не видно",
+    `📊 <i>${reasoning}</i>`,
     "",
   ].join("\n");
   const marketplaces = d.marketplaces.map((m) => MARKETPLACE_NAME[m]).join(", ");
-  const cost = costUsd === 0 ? "разбор вручную" : `анализ: $${costUsd.toFixed(2)}`;
-  const tail = `\n\nПлощадки: ${marketplaces} · ${cost}`;
-  const room = Math.max(0, MAX_MESSAGE_LENGTH - head.length - tail.length - 1);
-  const body = cut(d.descriptionUk, room);
-  return cut(`${head}\n${body}${tail}`, MAX_MESSAGE_LENGTH);
+  const cost = costUsd === 0 ? "🤝 разбор вручную" : `🤖 анализ $${costUsd.toFixed(2)}`;
+  const tail = `\n\n🛒 ${marketplaces} · ${cost}`;
+  const room = Math.max(0, MAX_MESSAGE_LENGTH - visibleLength(head) - visibleLength(tail) - 1);
+  const body = `<blockquote expandable>${esc(cut(d.descriptionUk, room))}</blockquote>`;
+  return `${head}\n${body}${tail}`;
 }
 
 const cut = (text: string, max: number) =>
@@ -54,18 +61,23 @@ export function splitMessage(text: string, max = MAX_MESSAGE_LENGTH): string[] {
 export function draftKeyboard(itemId: string, studioUrl?: string): Keyboard {
   // Telegram rejects the whole message if a web_app URL is not https.
   const studio: Keyboard = studioUrl?.startsWith("https://")
-    ? [[{ text: "🎨 Обработать фото", webAppUrl: `${studioUrl.replace(/\/+$/, "")}/studio?item=${itemId}` }]]
+    ? [
+        [
+          {
+            text: "🎨 Обработать фото",
+            webAppUrl: `${studioUrl.replace(/\/+$/, "")}/studio?item=${itemId}`,
+          },
+        ],
+      ]
     : [];
   return [
+    [{ text: "✅ Выставить", callbackData: `publish:${itemId}` }],
     [
-      { text: "Выставить", callbackData: `publish:${itemId}` },
-      { text: "Изменить цену", callbackData: `price:${itemId}` },
-    ],
-    [
-      { text: "Изменить текст", callbackData: `text:${itemId}` },
-      { text: "Отмена", callbackData: `cancel:${itemId}` },
+      { text: "💰 Цена", callbackData: `price:${itemId}` },
+      { text: "✏️ Текст", callbackData: `text:${itemId}` },
     ],
     ...studio,
+    [{ text: "🗑 Отмена", callbackData: `cancel:${itemId}` }],
   ];
 }
 

@@ -2,29 +2,45 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
+import {
+  adjustPrice,
+  esc,
+  itemCard,
+  itemsList,
+  listedKeyboard,
+  MAX_LISTED_ITEMS,
+  NEW_ITEM_TEXT,
+  PRICE_STEPS,
+  priceKeyboard,
+  soldKeyboard,
+  START_TEXT,
+  statsText,
+  uah,
+  type Stats,
+} from "./lib/botTexts";
 import { copyText, listingPhotos } from "./lib/draftMessage";
 import { deleteFile } from "./lib/fileOwners";
 import { clearAwaiting } from "./lib/itemState";
+import { BOT_COMMANDS } from "./lib/menu";
 import { isManualMode } from "./lib/mode";
 import { parsePrice } from "./lib/pricing";
 import * as telegramApi from "./lib/telegramApi";
-import { parseUpdate, type CallbackAction, type Incoming } from "./lib/telegramUpdate";
+import type { Keyboard } from "./lib/telegramApi";
+import {
+  parseUpdate,
+  type CallbackAction,
+  type Command,
+  type Incoming,
+} from "./lib/telegramUpdate";
+import type { ItemStatus } from "./lib/validators";
 
-export const HELP_TEXT = [
-  "Пришлите фото вещи — до 10 штук, можно альбомом. Подписью можно добавить подсказку:",
-  "«не работает кнопка», «торг», «размер M».",
-  "",
-  "Я распознаю вещь, найду похожие объявления, предложу цену и пришлю черновик.",
-  "Ничего не публикуется, пока вы не нажмёте «Выставить».",
-].join("\n");
-
-const NOTHING_TO_DO = "Пришлите фото вещи, чтобы начать.";
+const NOTHING_TO_DO = "📸 Пришлите фото вещи, чтобы начать. Меню — кнопки внизу.";
 const MANUAL_REWRITE_QUEUED =
   "Записал. Попросите Claude в чате: «перепиши» — новый текст придёт сюда.";
 const UNSUPPORTED_FILE =
   "Этот файл не подойдёт. Пришлите снимок как обычное фото (не файлом) — или файлом JPEG/PNG до 3,5 МБ.";
-const PRICE_PROMPT = "Напишите новую цену: «1500» — для OLX в гривнах, «$40» — для eBay.";
-const TEXT_PROMPT = "Что поменять в тексте? Например: «добавь, что есть коробка».";
+const PRICE_PROMPT = "✍️ Напишите новую цену: «1500» — для OLX в гривнах, «$40» — для eBay.";
+const TEXT_PROMPT = "✏️ Что поменять в тексте? Например: «добавь, что есть коробка».";
 
 function ownerId(): number {
   const raw = process.env.OWNER_TELEGRAM_ID;
@@ -59,7 +75,7 @@ export const handleUpdate = internalMutation({
         });
         break;
       case "command":
-        await send(ctx, incoming.chatId, HELP_TEXT);
+        await handleCommand(ctx, incoming.chatId, incoming.command);
         break;
       case "unsupported_file":
         await send(ctx, incoming.chatId, UNSUPPORTED_FILE);
@@ -89,10 +105,15 @@ export const storePhoto = internalAction({
     let storageId: Id<"_storage">;
     try {
       const file = await telegramApi.getFileBytes(fileId);
-      storageId = await ctx.storage.store(new Blob([file.bytes], { type: mimeType ?? file.mimeType }));
+      storageId = await ctx.storage.store(
+        new Blob([file.bytes], { type: mimeType ?? file.mimeType }),
+      );
     } catch (e) {
       console.error("photo download failed", e);
-      await telegramApi.sendMessage(chatId, "Не удалось скачать фото из Telegram. Пришлите его ещё раз.");
+      await telegramApi.sendMessage(
+        chatId,
+        "Не удалось скачать фото из Telegram. Пришлите его ещё раз.",
+      );
       return null;
     }
     await ctx.runMutation(internal.items.attachPhoto, {
@@ -133,20 +154,84 @@ export const setWebhook = internalAction({
     if (!secret) throw new Error("TELEGRAM_WEBHOOK_SECRET is not set");
     const url = `${site}/telegram`;
     await telegramApi.setWebhook(url, secret);
+    await telegramApi.setMyCommands(BOT_COMMANDS);
     return url;
   },
 });
 
-async function send(ctx: MutationCtx, chatId: number, text: string) {
-  await ctx.scheduler.runAfter(0, internal.bot.send, { chatId, text });
+interface SendOpts {
+  html?: boolean;
+  menu?: boolean;
+  keyboard?: Keyboard;
 }
 
-async function firstAwaiting(ctx: MutationCtx, awaiting: "price" | "text") {
+async function send(ctx: MutationCtx, chatId: number, text: string, opts: SendOpts = {}) {
+  await ctx.scheduler.runAfter(0, internal.bot.send, {
+    chatId,
+    text,
+    ...(opts.html ? { html: true } : {}),
+    ...(opts.menu ? { menu: true } : {}),
+    ...(opts.keyboard ? { keyboard: opts.keyboard } : {}),
+  });
+}
+
+type Awaiting = "price" | "text" | "sold";
+
+async function firstAwaiting(ctx: MutationCtx, awaiting: Awaiting) {
   return ctx.db
     .query("items")
     .withIndex("by_awaiting", (q) => q.eq("awaiting", awaiting))
     .order("desc")
     .first();
+}
+
+async function handleCommand(ctx: MutationCtx, chatId: number, command: Command) {
+  switch (command) {
+    case "start":
+      await send(ctx, chatId, START_TEXT, { html: true, menu: true });
+      return;
+    case "help":
+      await send(ctx, chatId, START_TEXT, { html: true });
+      return;
+    case "new":
+      await send(ctx, chatId, NEW_ITEM_TEXT);
+      return;
+    case "items": {
+      const recent = await ctx.db
+        .query("items")
+        .order("desc")
+        .take(MAX_LISTED_ITEMS * 3);
+      const shown = recent.filter((it) => it.status !== "cancelled").slice(0, MAX_LISTED_ITEMS);
+      const { text, keyboard } = itemsList(shown);
+      await send(ctx, chatId, text, { html: true, ...(keyboard.length ? { keyboard } : {}) });
+      return;
+    }
+    case "stats":
+      await send(ctx, chatId, statsText(await collectStats(ctx)), { html: true });
+      return;
+  }
+}
+
+const STATS_LIMIT = 1000;
+
+async function collectStats(ctx: MutationCtx): Promise<Stats> {
+  const byStatus = (status: "draft" | "approved" | "sold") =>
+    ctx.db
+      .query("items")
+      .withIndex("by_status", (q) => q.eq("status", status))
+      .take(STATS_LIMIT);
+  const [drafts, listed, sold] = await Promise.all([
+    byStatus("draft"),
+    byStatus("approved"),
+    byStatus("sold"),
+  ]);
+  return {
+    drafts: drafts.length,
+    listed: listed.length,
+    listedSum: listed.reduce((sum, it) => sum + (it.draft?.priceUah ?? 0), 0),
+    sold: sold.length,
+    soldSum: sold.reduce((sum, it) => sum + (it.soldPriceUah ?? 0), 0),
+  };
 }
 
 async function handleText(ctx: MutationCtx, chatId: number, text: string) {
@@ -163,7 +248,11 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
       return;
     }
     if ("usd" in price && !priceItem.draft.marketplaces.includes("ebay")) {
-      await send(ctx, chatId, "Этот черновик только для OLX — напишите цену в гривнах, например 1500.");
+      await send(
+        ctx,
+        chatId,
+        "Этот черновик только для OLX — напишите цену в гривнах, например 1500.",
+      );
       return;
     }
     const draft =
@@ -175,6 +264,22 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
     return;
   }
 
+  const soldItem = await firstAwaiting(ctx, "sold");
+  if (soldItem) {
+    const price = parsePrice(text);
+    if (!price || !("uah" in price)) {
+      await send(ctx, chatId, "Не понял сумму. Напишите в гривнах, например 2000.");
+      return;
+    }
+    if (soldItem.status !== "approved") {
+      await ctx.db.patch(soldItem._id, { awaiting: undefined });
+      await send(ctx, chatId, NOTHING_TO_DO);
+      return;
+    }
+    await markSold(ctx, soldItem, Math.round(price.uah));
+    return;
+  }
+
   const textItem = await firstAwaiting(ctx, "text");
   if (textItem) {
     await ctx.db.patch(textItem._id, { awaiting: undefined });
@@ -182,8 +287,11 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
       await ctx.db.patch(textItem._id, { rewriteRequest: text });
       await send(ctx, chatId, MANUAL_REWRITE_QUEUED);
     } else if (textItem.status === "draft") {
-      await send(ctx, chatId, "Переписываю…");
-      await ctx.scheduler.runAfter(0, internal.analyze.rewrite, { itemId: textItem._id, instruction: text });
+      await send(ctx, chatId, "✏️ Переписываю…");
+      await ctx.scheduler.runAfter(0, internal.analyze.rewrite, {
+        itemId: textItem._id,
+        instruction: text,
+      });
     } else {
       await send(ctx, chatId, NOTHING_TO_DO);
     }
@@ -215,42 +323,79 @@ async function handleText(ctx: MutationCtx, chatId: number, text: string) {
     return;
   }
   if (await latestWithStatus(ctx, "analyzing")) {
-    await send(ctx, chatId, "Уже разбираю фото — подождите немного.");
+    await send(ctx, chatId, "⏳ Уже разбираю фото — подождите немного.");
     return;
   }
 
   await send(ctx, chatId, NOTHING_TO_DO);
 }
 
+/** Which buttons work in which item status; anything else is an old button. */
+const ALLOWED: Record<CallbackAction, ItemStatus[]> = {
+  publish: ["draft"],
+  price: ["draft"],
+  pr: ["draft"],
+  prc: ["draft"],
+  text: ["draft"],
+  cancel: ["draft"],
+  sold: ["approved"],
+  soldat: ["approved"],
+  again: ["approved"],
+  unlist: ["approved"],
+  open: ["collecting", "queued", "analyzing", "needs_input", "draft", "approved", "sold", "failed"],
+};
+
 async function handleCallback(ctx: MutationCtx, cb: Extract<Incoming, { kind: "callback" }>) {
   const answer = (text?: string) =>
-    ctx.scheduler.runAfter(0, internal.bot.answer, { callbackId: cb.callbackId, ...(text ? { text } : {}) });
+    ctx.scheduler.runAfter(0, internal.bot.answer, {
+      callbackId: cb.callbackId,
+      ...(text ? { text } : {}),
+    });
 
   const itemId = ctx.db.normalizeId("items", cb.itemId);
   const item = itemId ? await ctx.db.get(itemId) : null;
-  if (!item || item.status !== "draft" || !item.draft) {
+  if (!item || !ALLOWED[cb.action].includes(item.status)) {
     await answer("Эта вещь уже обработана");
     return;
   }
-  await answer();
-  await ACTIONS[cb.action](ctx, item, item.draft);
+  const toast = await ACTIONS[cb.action](ctx, item, cb.arg);
+  await answer(toast ?? undefined);
 }
 
-const ACTIONS: Record<
-  CallbackAction,
-  (ctx: MutationCtx, item: Doc<"items">, draft: NonNullable<Doc<"items">["draft"]>) => Promise<void>
-> = {
-  publish: async (ctx, item, draft) => {
+type Action = (ctx: MutationCtx, item: Doc<"items">, arg?: string) => Promise<string | void>;
+
+const ACTIONS: Record<CallbackAction, Action> = {
+  publish: async (ctx, item) => {
+    const draft = item.draft!;
     await ctx.db.patch(item._id, { status: "approved", awaiting: undefined });
     await removeButtons(ctx, item);
-    // One action, so the photos arrive after the text.
+    // One action, so the photos arrive after the text and the card comes last.
     await ctx.scheduler.runAfter(0, internal.bot.sendWithPhotos, {
       chatId: item.chatId,
       text: `✅ Готово. Текст для OLX — скопируйте целиком:\n\n${copyText(draft)}`,
       storageIds: listingPhotos(item.studioPhotoIds ?? [], item.photoIds),
+      footer: {
+        text: `🛒 <b>${esc(draft.titleUk)}</b> выставлено.\nКогда продадите — нажмите «💵 Продано».`,
+        keyboard: listedKeyboard(item._id),
+      },
     });
+    return "Выставлено";
   },
   price: async (ctx, item) => {
+    await send(ctx, item.chatId, `💰 Сейчас: <b>${uah(item.draft!.priceUah)}</b>. Новая цена:`, {
+      html: true,
+      keyboard: priceKeyboard(item._id, item.draft!.priceUah),
+    });
+  },
+  pr: async (ctx, item, arg) => {
+    const percent = Number(arg);
+    if (!(PRICE_STEPS as readonly number[]).includes(percent)) return "Неизвестная кнопка";
+    const priceUah = adjustPrice(item.draft!.priceUah, percent);
+    await ctx.db.patch(item._id, { draft: { ...item.draft!, priceUah }, awaiting: undefined });
+    await ctx.scheduler.runAfter(0, internal.analyze.show, { itemId: item._id });
+    return `Цена: ${uah(priceUah)}`;
+  },
+  prc: async (ctx, item) => {
     await setAwaiting(ctx, item._id, "price");
     await send(ctx, item.chatId, PRICE_PROMPT);
   },
@@ -260,11 +405,74 @@ const ACTIONS: Record<
   },
   cancel: async (ctx, item) => {
     for (const id of item.studioPhotoIds ?? []) await deleteFile(ctx, id);
-    await ctx.db.patch(item._id, { status: "cancelled", awaiting: undefined, studioPhotoIds: undefined });
+    await ctx.db.patch(item._id, {
+      status: "cancelled",
+      awaiting: undefined,
+      studioPhotoIds: undefined,
+    });
     await removeButtons(ctx, item);
-    await send(ctx, item.chatId, "Отменено.");
+    await send(ctx, item.chatId, "🗑 Черновик отменён.");
+  },
+  open: async (ctx, item) => {
+    if (item.status === "draft") {
+      // Re-sends the draft at the bottom of the chat with its buttons.
+      await ctx.scheduler.runAfter(0, internal.analyze.show, { itemId: item._id });
+      return;
+    }
+    await send(ctx, item.chatId, itemCard(item), {
+      html: true,
+      ...(item.status === "approved" ? { keyboard: listedKeyboard(item._id) } : {}),
+    });
+  },
+  sold: async (ctx, item) => {
+    await setAwaiting(ctx, item._id, "sold");
+    await send(
+      ctx,
+      item.chatId,
+      "💵 За сколько продали? Напишите сумму в гривнах или нажмите кнопку.",
+      {
+        keyboard: soldKeyboard(item._id, item.draft?.priceUah ?? 0),
+      },
+    );
+  },
+  soldat: async (ctx, item) => {
+    await markSold(ctx, item, item.draft?.priceUah ?? 0);
+  },
+  again: async (ctx, item) => {
+    await ctx.scheduler.runAfter(0, internal.bot.sendWithPhotos, {
+      chatId: item.chatId,
+      text: copyText(item.draft!),
+      storageIds: listingPhotos(item.studioPhotoIds ?? [], item.photoIds),
+    });
+  },
+  unlist: async (ctx, item) => {
+    await ctx.db.patch(item._id, { status: "cancelled", awaiting: undefined });
+    await send(
+      ctx,
+      item.chatId,
+      `🗑 <b>${esc(item.draft?.titleUk ?? "Вещь")}</b> снята с продажи.`,
+      {
+        html: true,
+      },
+    );
   },
 };
+
+async function markSold(ctx: MutationCtx, item: Doc<"items">, priceUah: number) {
+  await ctx.db.patch(item._id, {
+    status: "sold",
+    soldPriceUah: priceUah,
+    soldAt: Date.now(),
+    awaiting: undefined,
+  });
+  const stats = await collectStats(ctx);
+  await send(
+    ctx,
+    item.chatId,
+    `🎉 Продано за <b>${uah(priceUah)}</b>!\nВсего продано: ${stats.sold} на ${uah(stats.soldSum)}.`,
+    { html: true },
+  );
+}
 
 async function removeButtons(ctx: MutationCtx, item: Doc<"items">) {
   if (item.draftMessageId !== undefined) {
@@ -276,7 +484,7 @@ async function removeButtons(ctx: MutationCtx, item: Doc<"items">) {
 }
 
 /** Only one item waits for a reply at a time: a new request replaces the old one. */
-async function setAwaiting(ctx: MutationCtx, itemId: Id<"items">, awaiting: "price" | "text") {
+async function setAwaiting(ctx: MutationCtx, itemId: Id<"items">, awaiting: Awaiting) {
   await clearAwaiting(ctx, itemId);
   await ctx.db.patch(itemId, { awaiting });
 }

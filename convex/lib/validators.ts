@@ -5,7 +5,9 @@ export const itemStatusValidator = v.union(
   v.literal("analyzing"),
   v.literal("needs_input"),
   v.literal("draft"),
+  /** Listed for sale (the owner pressed «Выставить»). */
   v.literal("approved"),
+  v.literal("sold"),
   v.literal("cancelled"),
   v.literal("failed"),
   /** Manual mode: waits for Claude in the chat to analyse it. */
@@ -49,7 +51,7 @@ export type Draft = Infer<typeof draftValidator>;
 export const answerValidator = v.object({ question: v.string(), answer: v.string() });
 export type Answer = Infer<typeof answerValidator>;
 
-export const awaitingValidator = v.union(v.literal("price"), v.literal("text"));
+export const awaitingValidator = v.union(v.literal("price"), v.literal("text"), v.literal("sold"));
 
 export const comparableValidator = v.object({
   title: v.string(),

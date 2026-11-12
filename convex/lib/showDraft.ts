@@ -16,11 +16,16 @@ export async function showDraft(ctx: ActionCtx, itemId: Id<"items">): Promise<vo
   const keyboard = draftKeyboard(itemId, process.env.STUDIO_URL);
 
   if (item.draftMessageId === undefined && item.statusMessageId !== undefined) {
-    await telegram.editMessageText(item.chatId, item.statusMessageId, text, keyboard);
-    await ctx.runMutation(internal.items.setDraftMessage, { itemId, messageId: item.statusMessageId });
+    await telegram.editMessageText(item.chatId, item.statusMessageId, text, keyboard, {
+      html: true,
+    });
+    await ctx.runMutation(internal.items.setDraftMessage, {
+      itemId,
+      messageId: item.statusMessageId,
+    });
     return;
   }
-  const messageId = await telegram.sendMessage(item.chatId, text, keyboard);
+  const messageId = await telegram.sendMessage(item.chatId, text, keyboard, { html: true });
   await ctx.runMutation(internal.items.setDraftMessage, { itemId, messageId });
   if (item.draftMessageId !== undefined) {
     // Best effort: an old message may already be gone.

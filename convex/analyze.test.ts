@@ -14,6 +14,8 @@ vi.mock("./lib/telegramApi", () => ({
   getFileBytes: vi.fn(),
   setWebhook: vi.fn(),
   sendMediaGroup: vi.fn(async () => {}),
+  sendChatAction: vi.fn(async () => {}),
+  setMyCommands: vi.fn(async () => {}),
 }));
 vi.mock("./lib/agent", async (orig) => ({
   ...(await orig<typeof import("./lib/agent")>()),
@@ -82,7 +84,7 @@ test("a draft replaces the 'working' message and stores comparables", async () =
   const [, messageId, text, keyboard] = vi.mocked(tg.editMessageText).mock.calls[0];
   expect(messageId).toBe(777);
   expect(text).toContain("📦 Чайник Bosch");
-  expect(text).toContain("анализ: $0.09");
+  expect(text).toContain("🤖 анализ $0.09");
   expect((keyboard?.[0][0] as { callbackData: string }).callbackData).toBe(`publish:${itemId}`);
 
   const item = await t.run((ctx) => ctx.db.get(itemId));

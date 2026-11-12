@@ -16,6 +16,8 @@ vi.mock("./lib/telegramApi", () => ({
   getFileBytes: vi.fn(),
   setWebhook: vi.fn(),
   sendMediaGroup: vi.fn(async () => {}),
+  sendChatAction: vi.fn(async () => {}),
+  setMyCommands: vi.fn(async () => {}),
 }));
 import * as tg from "./lib/telegramApi";
 

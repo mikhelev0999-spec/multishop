@@ -3,7 +3,7 @@ import type { MutationCtx } from "../_generated/server";
 
 /** Drops any pending "write the new price / what to change" request. */
 export async function clearAwaiting(ctx: MutationCtx, except?: Id<"items">): Promise<void> {
-  for (const kind of ["price", "text"] as const) {
+  for (const kind of ["price", "text", "sold"] as const) {
     const waiting = await ctx.db
       .query("items")
       .withIndex("by_awaiting", (q) => q.eq("awaiting", kind))

@@ -1,4 +1,5 @@
 // The only place that talks to the Telegram Bot API. Mocked in tests.
+import { MENU_LAYOUT } from "./menu";
 
 /** A callback button, or a button that opens a Mini App page. */
 export type Button = { text: string; callbackData: string } | { text: string; webAppUrl: string };
@@ -10,12 +11,25 @@ function token(): string {
   return t;
 }
 
+/** fetch whose network errors never carry the URL: it contains the bot token and ends up in logs. */
+async function fetchQuiet(
+  url: string,
+  init: RequestInit | undefined,
+  what: string,
+): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new Error(`Telegram ${what}: network error`);
+  }
+}
+
 async function call<T>(method: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`https://api.telegram.org/bot${token()}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await fetchQuiet(
+    `https://api.telegram.org/bot${token()}/${method}`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+    method,
+  );
   const json = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
     result?: T;
@@ -37,11 +51,31 @@ const markup = (keyboard: Keyboard) => ({
   ),
 });
 
-export async function sendMessage(chatId: number, text: string, keyboard?: Keyboard): Promise<number> {
+export interface SendOptions {
+  /** Text uses Telegram HTML markup (<b>, <i>, <blockquote>); dynamic parts must be escaped. */
+  html?: boolean;
+  /** Show the persistent menu under the message box (instead of inline buttons). */
+  menu?: boolean;
+}
+
+const menuMarkup = () => ({
+  keyboard: MENU_LAYOUT.map((row) => row.map((text) => ({ text }))),
+  resize_keyboard: true,
+  is_persistent: true,
+});
+
+export async function sendMessage(
+  chatId: number,
+  text: string,
+  keyboard?: Keyboard,
+  opts: SendOptions = {},
+): Promise<number> {
+  const replyMarkup = keyboard ? markup(keyboard) : opts.menu ? menuMarkup() : undefined;
   const result = await call<{ message_id: number }>("sendMessage", {
     chat_id: chatId,
     text,
-    ...(keyboard ? { reply_markup: markup(keyboard) } : {}),
+    ...(opts.html ? { parse_mode: "HTML", link_preview_options: { is_disabled: true } } : {}),
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
   return result.message_id;
 }
@@ -52,13 +86,29 @@ export async function editMessageText(
   messageId: number,
   text: string,
   keyboard?: Keyboard,
+  opts: Pick<SendOptions, "html"> = {},
 ): Promise<void> {
   await call("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text,
+    ...(opts.html ? { parse_mode: "HTML", link_preview_options: { is_disabled: true } } : {}),
     ...(keyboard ? { reply_markup: markup(keyboard) } : {}),
   });
+}
+
+/** "typing…" under the bot's name for ~5 seconds. */
+export async function sendChatAction(
+  chatId: number,
+  action: "typing" | "upload_photo",
+): Promise<void> {
+  await call("sendChatAction", { chat_id: chatId, action });
+}
+
+export async function setMyCommands(
+  commands: { command: string; description: string }[],
+): Promise<void> {
+  await call("setMyCommands", { commands });
 }
 
 /** Removes the inline buttons and keeps the text. */
@@ -82,10 +132,16 @@ const MIME_BY_EXT: Record<string, string> = {
   gif: "image/gif",
 };
 
-export async function getFileBytes(fileId: string): Promise<{ bytes: ArrayBuffer; mimeType: string }> {
+export async function getFileBytes(
+  fileId: string,
+): Promise<{ bytes: ArrayBuffer; mimeType: string }> {
   const { file_path } = await call<{ file_path?: string }>("getFile", { file_id: fileId });
   if (!file_path) throw new Error("Telegram getFile returned no file_path");
-  const res = await fetch(`https://api.telegram.org/file/bot${token()}/${file_path}`);
+  const res = await fetchQuiet(
+    `https://api.telegram.org/file/bot${token()}/${file_path}`,
+    undefined,
+    "file download",
+  );
   if (!res.ok) throw new Error(`Telegram file download failed: HTTP ${res.status}`);
   const ext = file_path.split(".").pop()?.toLowerCase() ?? "";
   return { bytes: await res.arrayBuffer(), mimeType: MIME_BY_EXT[ext] ?? "image/jpeg" };

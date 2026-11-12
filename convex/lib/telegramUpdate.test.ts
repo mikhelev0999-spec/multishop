@@ -66,7 +66,7 @@ describe("parseUpdate", () => {
     expect(r).toEqual({ kind: "text", updateId: 5, fromId: 42, chatId: 4242, text: "1500" });
   });
 
-  test.each(["start", "help"] as const)("/%s command", (command) => {
+  test.each(["start", "help", "items", "stats"] as const)("/%s command", (command) => {
     const r = parseUpdate({ update_id: 6, message: { message_id: 15, from, chat, text: `/${command}` } });
     expect(r).toEqual({ kind: "command", updateId: 6, fromId: 42, chatId: 4242, command });
   });
@@ -96,6 +96,24 @@ describe("parseUpdate", () => {
       action,
       itemId: "item123",
     });
+  });
+
+  test.each([
+    ["📦 Мои вещи", "items"],
+    ["📸 Новая вещь", "new"],
+    ["📊 Статистика", "stats"],
+    ["❓ Помощь", "help"],
+  ] as const)("menu button %s is the %s command", (text, command) => {
+    const r = parseUpdate({ update_id: 6, message: { message_id: 15, from, chat, text } });
+    expect(r).toEqual({ kind: "command", updateId: 6, fromId: 42, chatId: 4242, command });
+  });
+
+  test("a callback with an argument", () => {
+    const r = parseUpdate({
+      update_id: 8,
+      callback_query: { id: "cb", from, data: "pr:item1:-10", message: { message_id: 1, chat } },
+    });
+    expect(r).toMatchObject({ kind: "callback", action: "pr", itemId: "item1", arg: "-10" });
   });
 
   test("garbage callback data is ignored", () => {

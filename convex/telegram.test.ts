@@ -12,9 +12,14 @@ vi.mock("./lib/telegramApi", () => ({
   editMessageText: vi.fn(async () => {}),
   removeKeyboard: vi.fn(async () => {}),
   answerCallbackQuery: vi.fn(async () => {}),
-  getFileBytes: vi.fn(async () => ({ bytes: new Uint8Array([1, 2, 3]).buffer, mimeType: "image/jpeg" })),
+  getFileBytes: vi.fn(async () => ({
+    bytes: new Uint8Array([1, 2, 3]).buffer,
+    mimeType: "image/jpeg",
+  })),
   setWebhook: vi.fn(async () => {}),
   sendMediaGroup: vi.fn(async () => {}),
+  sendChatAction: vi.fn(async () => {}),
+  setMyCommands: vi.fn(async () => {}),
 }));
 vi.mock("./lib/agent", async (orig) => ({
   ...(await orig<typeof import("./lib/agent")>()),
@@ -221,14 +226,20 @@ describe("buttons", () => {
     vi.clearAllMocks();
     await deliver(t, button("publish", id));
     expect((await items(t))[0].status).toBe("cancelled");
-    expect(tg.answerCallbackQuery).toHaveBeenCalledWith(expect.any(String), "Эта вещь уже обработана");
+    expect(tg.answerCallbackQuery).toHaveBeenCalledWith(
+      expect.any(String),
+      "Эта вещь уже обработана",
+    );
     expect(tg.sendMessage).not.toHaveBeenCalled();
   });
 
   test("a button with a foreign id does not crash", async () => {
     const t = convexTest(schema, modules);
     await deliver(t, button("publish", "not-an-id"));
-    expect(tg.answerCallbackQuery).toHaveBeenCalledWith(expect.any(String), "Эта вещь уже обработана");
+    expect(tg.answerCallbackQuery).toHaveBeenCalledWith(
+      expect.any(String),
+      "Эта вещь уже обработана",
+    );
   });
 });
 
@@ -236,7 +247,7 @@ describe("owner replies", () => {
   test("change price in UAH, then the draft is shown again", async () => {
     const t = convexTest(schema, modules);
     const id = await draftItem(t);
-    await deliver(t, button("price", id));
+    await deliver(t, button("prc", id));
     expect(sentTexts()[0]).toContain("Напишите новую цену");
     vi.clearAllMocks();
     await deliver(t, text("3 900 грн"));
@@ -251,7 +262,7 @@ describe("owner replies", () => {
   test("change eBay price in USD", async () => {
     const t = convexTest(schema, modules);
     const id = await draftItem(t);
-    await deliver(t, button("price", id), text("$95"));
+    await deliver(t, button("prc", id), text("$95"));
     const [item] = await items(t);
     expect(item.draft).toMatchObject({ priceUah: 4500, priceUsd: 95 });
   });
@@ -259,7 +270,7 @@ describe("owner replies", () => {
   test("unreadable price asks again and keeps waiting", async () => {
     const t = convexTest(schema, modules);
     const id = await draftItem(t);
-    await deliver(t, button("price", id));
+    await deliver(t, button("prc", id));
     vi.clearAllMocks();
     await deliver(t, text("подороже"));
     expect(sentTexts()[0]).toContain("Не понял цену");
@@ -269,7 +280,10 @@ describe("owner replies", () => {
   test("change text runs a rewrite with the instruction", async () => {
     const t = convexTest(schema, modules);
     const id = await draftItem(t);
-    vi.mocked(runRewrite).mockResolvedValue({ draft: { ...draft, descriptionUk: "З коробкою." }, costUsd: 0.01 });
+    vi.mocked(runRewrite).mockResolvedValue({
+      draft: { ...draft, descriptionUk: "З коробкою." },
+      costUsd: 0.01,
+    });
     await deliver(t, button("text", id), text("добавь, что есть коробка"));
     expect(vi.mocked(runRewrite).mock.calls[0][0].instruction).toBe("добавь, что есть коробка");
     const [item] = await items(t);
@@ -279,7 +293,11 @@ describe("owner replies", () => {
 
   test("a question from Claude, the owner's answer, then a draft", async () => {
     const t = convexTest(schema, modules);
-    vi.mocked(runAgent).mockResolvedValueOnce({ kind: "question", question: "Сколько памяти?", costUsd: 0.05 });
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      kind: "question",
+      question: "Сколько памяти?",
+      costUsd: 0.05,
+    });
     await deliver(t, photo("phone"));
     let [item] = await items(t);
     expect(item.status).toBe("needs_input");
@@ -297,7 +315,7 @@ describe("owner replies", () => {
   test("text with nothing pending gets a hint", async () => {
     const t = convexTest(schema, modules);
     await deliver(t, text("привет"));
-    expect(sentTexts()[0]).toBe("Пришлите фото вещи, чтобы начать.");
+    expect(sentTexts()[0]).toContain("Пришлите фото вещи, чтобы начать");
   });
 
   test("asking for a new price on one item cancels waiting on another", async () => {
@@ -305,7 +323,7 @@ describe("owner replies", () => {
     const first = await draftItem(t);
     await deliver(t, photo("second"));
     const second = (await items(t)).find((i) => i._id !== first)!._id;
-    await deliver(t, button("text", first), button("price", second));
+    await deliver(t, button("text", first), button("prc", second));
     const all = await items(t);
     expect(all.find((i) => i._id === first)?.awaiting).toBeUndefined();
     expect(all.find((i) => i._id === second)?.awaiting).toBe("price");
@@ -316,8 +334,12 @@ describe("review fixes", () => {
   test("a new item drops a forgotten price request, so the answer goes to the new question", async () => {
     const t = convexTest(schema, modules);
     const a = await draftItem(t);
-    await deliver(t, button("price", a));
-    vi.mocked(runAgent).mockResolvedValueOnce({ kind: "question", question: "Сколько памяти?", costUsd: 0 });
+    await deliver(t, button("prc", a));
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      kind: "question",
+      question: "Сколько памяти?",
+      costUsd: 0,
+    });
     await deliver(t, photo("b"));
     await deliver(t, text("64"));
     const all = await items(t);
@@ -329,7 +351,11 @@ describe("review fixes", () => {
 
   test("a new item cancels an unanswered question about an older one", async () => {
     const t = convexTest(schema, modules);
-    vi.mocked(runAgent).mockResolvedValueOnce({ kind: "question", question: "Размер?", costUsd: 0 });
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      kind: "question",
+      question: "Размер?",
+      costUsd: 0,
+    });
     await deliver(t, photo("shirt"));
     await deliver(t, photo("kettle"));
     const statuses = (await items(t)).map((i) => i.status).sort();
@@ -358,7 +384,7 @@ describe("review fixes", () => {
       costUsd: 0,
     });
     const id = await draftItem(t);
-    await deliver(t, button("price", id), text("$40"));
+    await deliver(t, button("prc", id), text("$40"));
     expect(sentTexts().at(-1)).toContain("только для OLX");
     expect((await items(t))[0].draft?.priceUsd).toBe(110);
   });
@@ -374,8 +400,10 @@ describe("review fixes", () => {
     const id = await draftItem(t);
     await deliver(t, button("publish", id));
     const parts = sentTexts();
-    expect(parts.length).toBe(2);
+    // Two parts of the text to paste, then the "listed" card with its buttons.
+    expect(parts.length).toBe(3);
     expect(parts.every((p) => p.length <= 4096)).toBe(true);
+    expect(parts[2]).toContain("выставлено");
   });
 
   test("a price changed during a rewrite survives it", async () => {
@@ -411,7 +439,146 @@ describe("review fixes", () => {
     await t.mutation(internal.items.watchdog, { itemId: id, run: 2 });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
     expect((await items(t))[0].status).toBe("failed");
-    expect(sentTexts()).toContain("Разбор занял слишком много времени и прервался. Пришлите фото ещё раз.");
+    expect(sentTexts()).toContain(
+      "Разбор занял слишком много времени и прервался. Пришлите фото ещё раз.",
+    );
   });
 });
 
+describe("menu and items", () => {
+  const sendOpts = () => vi.mocked(tg.sendMessage).mock.calls.map((c) => c[3]);
+
+  test("/start greets with the persistent menu", async () => {
+    const t = convexTest(schema, modules);
+    await deliver(t, msg({ text: "/start" }));
+    expect(sentTexts()[0]).toContain("Привет");
+    expect(sendOpts()[0]).toEqual({ html: true, menu: true });
+  });
+
+  test("«📦 Мои вещи» lists items with open buttons, cancelled ones hidden", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, photo("second"));
+    const other = (await items(t)).find((i) => i._id !== id)!._id;
+    await deliver(t, button("cancel", other));
+    vi.clearAllMocks();
+    await deliver(t, msg({ text: "📦 Мои вещи" }));
+    expect(sentTexts()[0]).toContain("Мои вещи");
+    const keyboard = vi.mocked(tg.sendMessage).mock.calls[0][2]!;
+    expect(keyboard).toHaveLength(1);
+    expect(keyboard[0][0]).toMatchObject({ callbackData: `open:${id}` });
+  });
+
+  test("opening a draft re-sends it with its buttons", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, button("open", id));
+    expect(sentTexts()[0]).toContain("Навушники Sony WH-1000XM4");
+    expect(vi.mocked(tg.sendMessage).mock.calls[0][3]).toEqual({ html: true });
+  });
+
+  test("/stats counts drafts, listed and sold", async () => {
+    const t = convexTest(schema, modules);
+    const a = await draftItem(t);
+    await deliver(t, button("publish", a), button("soldat", a));
+    await deliver(t, photo("second"));
+    vi.clearAllMocks();
+    await deliver(t, msg({ text: "/stats" }));
+    expect(sentTexts()[0]).toContain("✅ Продано: <b>1</b> на <b>4 500 грн</b>");
+    expect(sentTexts()[0]).toContain("📝 Черновиков: <b>1</b>");
+  });
+});
+
+describe("price buttons", () => {
+  test("«💰 Цена» offers steps; a step changes the price and re-shows the draft", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, button("price", id));
+    expect(sentTexts()[0]).toContain("Сейчас: <b>4 500 грн</b>");
+    vi.clearAllMocks();
+    await deliver(t, {
+      ...button("pr", id),
+      callback_query: { ...button("pr", id).callback_query, data: `pr:${id}:-10` },
+    });
+    expect((await items(t))[0].draft?.priceUah).toBe(4050);
+    expect(tg.answerCallbackQuery).toHaveBeenCalledWith(expect.any(String), "Цена: 4 050 грн");
+    expect(sentTexts()[0]).toContain("4 050 грн");
+  });
+
+  test("an unknown step is refused", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, {
+      ...button("pr", id),
+      callback_query: { ...button("pr", id).callback_query, data: `pr:${id}:-90` },
+    });
+    expect((await items(t))[0].draft?.priceUah).toBe(4500);
+  });
+});
+
+describe("after publishing", () => {
+  async function listed(t: ReturnType<typeof convexTest>) {
+    const id = await draftItem(t);
+    await deliver(t, button("publish", id));
+    vi.clearAllMocks();
+    return id;
+  }
+
+  test("publish ends with a card that has sale buttons", async () => {
+    const t = convexTest(schema, modules);
+    const id = await draftItem(t);
+    await deliver(t, button("publish", id));
+    const last = vi.mocked(tg.sendMessage).mock.calls.at(-1)!;
+    expect(last[1]).toContain("выставлено");
+    expect(last[2]?.[0][0]).toMatchObject({ callbackData: `sold:${id}` });
+  });
+
+  test("sold at another price via text", async () => {
+    const t = convexTest(schema, modules);
+    const id = await listed(t);
+    await deliver(t, button("sold", id));
+    expect(sentTexts()[0]).toContain("За сколько продали");
+    await deliver(t, text("4 000"));
+    const [item] = await items(t);
+    expect(item).toMatchObject({ status: "sold", soldPriceUah: 4000 });
+    expect(item.awaiting).toBeUndefined();
+    expect(sentTexts().at(-1)).toContain("🎉 Продано за <b>4 000 грн</b>");
+  });
+
+  test("sold at the asking price with one button", async () => {
+    const t = convexTest(schema, modules);
+    const id = await listed(t);
+    await deliver(t, button("soldat", id));
+    expect((await items(t))[0]).toMatchObject({ status: "sold", soldPriceUah: 4500 });
+  });
+
+  test("again re-sends the text and the photos", async () => {
+    const t = convexTest(schema, modules);
+    const id = await listed(t);
+    await deliver(t, button("again", id));
+    expect(sentTexts()[0]).toContain("4500 грн");
+    expect(tg.sendMediaGroup).toHaveBeenCalled();
+  });
+
+  test("unlist takes it off sale; draft buttons no longer work on a listed item", async () => {
+    const t = convexTest(schema, modules);
+    const id = await listed(t);
+    await deliver(t, button("publish", id));
+    expect(tg.answerCallbackQuery).toHaveBeenCalledWith(
+      expect.any(String),
+      "Эта вещь уже обработана",
+    );
+    await deliver(t, button("unlist", id));
+    expect((await items(t))[0].status).toBe("cancelled");
+    expect(sentTexts().at(-1)).toContain("снята с продажи");
+  });
+
+  test("opening a listed item shows its card with sale buttons", async () => {
+    const t = convexTest(schema, modules);
+    const id = await listed(t);
+    await deliver(t, button("open", id));
+    const [, txt, keyboard] = vi.mocked(tg.sendMessage).mock.calls[0];
+    expect(txt).toContain("🛒 выставлено");
+    expect(keyboard?.[0][0]).toMatchObject({ callbackData: `sold:${id}` });
+  });
+});
