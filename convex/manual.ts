@@ -12,7 +12,7 @@ import * as telegram from "./lib/telegramApi";
 import { answerValidator, draftValidator } from "./lib/validators";
 
 const QUEUED_TEXT = (n: number) =>
-  `📥 Фото получены (${n}). Напишите Claude в чат «разбери» — черновик придёт сюда.`;
+  `📥 Фото получены (${n}). Черновик придёт через пару минут. Если не пришёл — напишите Claude в чат «разбери».`;
 
 export const markQueued = internalMutation({
   args: { itemId: v.id("items"), photoAt: v.number() },

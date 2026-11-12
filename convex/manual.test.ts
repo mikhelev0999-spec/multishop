@@ -79,7 +79,7 @@ test("without a key, photos are queued for Claude in the chat", async () => {
   const [item] = await items(t);
   expect(item.status).toBe("queued");
   expect(runAgent).not.toHaveBeenCalled();
-  expect(sentTexts()[0]).toContain("Напишите Claude в чат «разбери»");
+  expect(sentTexts()[0]).toContain("Черновик придёт через пару минут");
 
   const q = await t.query(internal.manual.queue, {});
   expect(q.analyze).toHaveLength(1);
