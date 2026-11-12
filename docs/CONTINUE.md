@@ -1,18 +1,27 @@
 # Multishop — где мы
 
 Спека: `docs/superpowers/specs/2026-11-11-multishop-design.md`.
-План этапа 1: `docs/superpowers/plans/2026-11-11-stage-1-draft-from-photo.md`.
+Планы: `docs/superpowers/plans/` (этап 1 — черновик из фото, этап 1б — фотостудия).
 
 ## Состояние
 
 - Этап 0: заготовка проекта. Готово.
-- Этап 1 «Черновик из фото»: код и тесты в ветке `stage-1-draft-from-photo`.
-  Не проверено на реальном боте (задача 10 плана) — нужен деплоймент Convex и ключи.
-- Деплоймент Convex, бот Telegram и проект Vercel ещё не созданы.
+- Этап 1 «Черновик из фото»: готов, в `main`. Бот работает на dev-деплойменте Convex
+  `hip-ocelot-929`, вебхук Telegram подключён.
+- Ручной режим: пока в Convex нет `ANTHROPIC_API_KEY`, разбор фото делает Claude в чате
+  (`npx convex run manual:queue` / `manual:submitDraft` / `manual:ask`).
+- Этап 1б «Фотостудия»: код готов, в `main`, сервер загружен в Convex. Ждёт публикации
+  страницы на Vercel и переменной `STUDIO_URL` в Convex; на телефоне не проверялась.
+- Нет ключей Anthropic и eBay; поиск цен на eBay не работает.
+
+## Как работать из облачной сессии Claude
+
+- Среда `multishop` пускает к `api.convex.dev`, `auth.convex.dev`, `hip-ocelot-929.convex.cloud`.
+- Node ходит через прокси только с `NODE_USE_ENV_PROXY=1`.
+- Вход в Convex: `npx convex login --no-open --login-flow poll`, владелец открывает ссылку.
 
 ## Дальше
 
-1. Владелец: ключи по таблице в README, `npx convex dev`, переменные в дашборд Convex,
-   `npx convex run telegram:setWebhook`.
-2. Прогон на 5–10 реальных вещах, запись результатов в «Итог выполнения» плана этапа 1.
-3. Слияние ветки в `main`, затем этап 2 (публикация на eBay).
+1. Владелец публикует сайт на Vercel (README, «Фотостудия»), присылает адрес → `STUDIO_URL`.
+2. Проверка студии на телефоне; прогон 5–10 вещей (задача 10 этапа 1).
+3. Публикация на OLX: через браузер на компьютере владельца или Partner API (этап 3).
