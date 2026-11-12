@@ -4,6 +4,7 @@ import {
   editMessageText,
   getFileBytes,
   removeKeyboard,
+  sendMediaGroup,
   sendMessage,
   setWebhook,
 } from "./telegramApi";
@@ -59,6 +60,37 @@ test("removeKeyboard keeps the text and drops buttons", async () => {
     url: "https://api.telegram.org/botTOKEN/editMessageReplyMarkup",
     body: { chat_id: 1, message_id: 7, reply_markup: { inline_keyboard: [] } },
   });
+});
+
+test("a web app button opens a page", async () => {
+  fetchMock.mockResolvedValueOnce(ok({ message_id: 8 }));
+  await sendMessage(1, "x", [[{ text: "Студия", webAppUrl: "https://s.app/studio?item=1" }]]);
+  expect(lastCall().body.reply_markup).toEqual({
+    inline_keyboard: [[{ text: "Студия", web_app: { url: "https://s.app/studio?item=1" } }]],
+  });
+});
+
+test("sendMediaGroup sends an album, a single photo with sendPhoto, nothing for none", async () => {
+  fetchMock.mockImplementation(async () => ok(true));
+  await sendMediaGroup(1, ["https://a/1", "https://a/2"]);
+  expect(lastCall()).toEqual({
+    url: "https://api.telegram.org/botTOKEN/sendMediaGroup",
+    body: {
+      chat_id: 1,
+      media: [
+        { type: "photo", media: "https://a/1" },
+        { type: "photo", media: "https://a/2" },
+      ],
+    },
+  });
+  await sendMediaGroup(1, ["https://a/1"]);
+  expect(lastCall()).toEqual({
+    url: "https://api.telegram.org/botTOKEN/sendPhoto",
+    body: { chat_id: 1, photo: "https://a/1" },
+  });
+  fetchMock.mockClear();
+  await sendMediaGroup(1, []);
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 test("answerCallbackQuery", async () => {

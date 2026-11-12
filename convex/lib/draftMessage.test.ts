@@ -1,5 +1,12 @@
 import { expect, test } from "vitest";
-import { copyText, draftKeyboard, formatDraft, MAX_MESSAGE_LENGTH, splitMessage } from "./draftMessage";
+import {
+  copyText,
+  draftKeyboard,
+  formatDraft,
+  listingPhotos,
+  MAX_MESSAGE_LENGTH,
+  splitMessage,
+} from "./draftMessage";
 import type { Draft } from "./validators";
 
 const draft: Draft = {
@@ -80,4 +87,17 @@ test("splitMessage keeps short text whole and cuts long text at line breaks", ()
   const parts = splitMessage(solid);
   expect(parts.every((p) => p.length <= MAX_MESSAGE_LENGTH)).toBe(true);
   expect(parts.join("")).toBe(solid);
+});
+
+test("with a studio URL the keyboard gets a Mini App button", () => {
+  const kb = draftKeyboard("abc", "https://studio.example/");
+  expect(kb).toHaveLength(3);
+  expect(kb[2]).toEqual([{ text: "🎨 Обработать фото", webAppUrl: "https://studio.example/studio?item=abc" }]);
+});
+
+test("listing photos: processed first, then originals, at most 10", () => {
+  expect(listingPhotos(["s1"], ["o1", "o2"])).toEqual(["s1", "o1", "o2"]);
+  const many = Array.from({ length: 9 }, (_, i) => `o${i}`);
+  expect(listingPhotos(["s1", "s2"], many)).toHaveLength(10);
+  expect(listingPhotos(["s1", "s2"], many).slice(0, 2)).toEqual(["s1", "s2"]);
 });

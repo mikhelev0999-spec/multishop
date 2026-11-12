@@ -4,7 +4,11 @@ import { internalAction } from "./_generated/server";
 import { splitMessage } from "./lib/draftMessage";
 import * as telegram from "./lib/telegramApi";
 
-const keyboardValidator = v.array(v.array(v.object({ text: v.string(), callbackData: v.string() })));
+const buttonValidator = v.union(
+  v.object({ text: v.string(), callbackData: v.string() }),
+  v.object({ text: v.string(), webAppUrl: v.string() }),
+);
+const keyboardValidator = v.array(v.array(buttonValidator));
 
 export const send = internalAction({
   args: { chatId: v.number(), text: v.string(), keyboard: v.optional(keyboardValidator) },
@@ -37,6 +41,33 @@ export const removeKeyboard = internalAction({
   returns: v.null(),
   handler: async (_ctx, { chatId, messageId }) => {
     await telegram.removeKeyboard(chatId, messageId);
+    return null;
+  },
+});
+
+export const sendPhotos = internalAction({
+  args: { chatId: v.number(), storageIds: v.array(v.id("_storage")) },
+  returns: v.null(),
+  handler: async (ctx, { chatId, storageIds }) => {
+    const urls = await Promise.all(storageIds.map((id) => ctx.storage.getUrl(id)));
+    await telegram.sendMediaGroup(
+      chatId,
+      urls.filter((u): u is string => u !== null),
+    );
+    return null;
+  },
+});
+
+export const sendWithPhotos = internalAction({
+  args: { chatId: v.number(), text: v.string(), storageIds: v.array(v.id("_storage")) },
+  returns: v.null(),
+  handler: async (ctx, { chatId, text, storageIds }) => {
+    for (const part of splitMessage(text)) await telegram.sendMessage(chatId, part);
+    const urls = await Promise.all(storageIds.map((id) => ctx.storage.getUrl(id)));
+    await telegram.sendMediaGroup(
+      chatId,
+      urls.filter((u): u is string => u !== null),
+    );
     return null;
   },
 });

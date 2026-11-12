@@ -12,6 +12,8 @@ export default defineSchema({
     chatId: v.number(),
     status: itemStatusValidator,
     photoIds: v.array(v.id("_storage")),
+    /** Processed in the photo studio (background removed); shown before the originals. */
+    studioPhotoIds: v.optional(v.array(v.id("_storage"))),
     mediaGroupId: v.optional(v.string()),
     caption: v.optional(v.string()),
     lastPhotoAt: v.number(),

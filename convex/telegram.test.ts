@@ -14,6 +14,7 @@ vi.mock("./lib/telegramApi", () => ({
   answerCallbackQuery: vi.fn(async () => {}),
   getFileBytes: vi.fn(async () => ({ bytes: new Uint8Array([1, 2, 3]).buffer, mimeType: "image/jpeg" })),
   setWebhook: vi.fn(async () => {}),
+  sendMediaGroup: vi.fn(async () => {}),
 }));
 vi.mock("./lib/agent", async (orig) => ({
   ...(await orig<typeof import("./lib/agent")>()),

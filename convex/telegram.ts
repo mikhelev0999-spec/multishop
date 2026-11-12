@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
-import { copyText } from "./lib/draftMessage";
+import { copyText, listingPhotos } from "./lib/draftMessage";
 import { clearAwaiting } from "./lib/itemState";
 import { isManualMode } from "./lib/mode";
 import { parsePrice } from "./lib/pricing";
@@ -242,7 +242,12 @@ const ACTIONS: Record<
   publish: async (ctx, item, draft) => {
     await ctx.db.patch(item._id, { status: "approved", awaiting: undefined });
     await removeButtons(ctx, item);
-    await send(ctx, item.chatId, `✅ Готово. Текст для OLX — скопируйте целиком:\n\n${copyText(draft)}`);
+    // One action, so the photos arrive after the text.
+    await ctx.scheduler.runAfter(0, internal.bot.sendWithPhotos, {
+      chatId: item.chatId,
+      text: `✅ Готово. Текст для OLX — скопируйте целиком:\n\n${copyText(draft)}`,
+      storageIds: listingPhotos(item.studioPhotoIds ?? [], item.photoIds),
+    });
   },
   price: async (ctx, item) => {
     await setAwaiting(ctx, item._id, "price");

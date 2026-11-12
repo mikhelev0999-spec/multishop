@@ -13,7 +13,7 @@ export async function showDraft(ctx: ActionCtx, itemId: Id<"items">): Promise<vo
   const item = await ctx.runQuery(internal.items.get, { itemId });
   if (!item?.draft || item.status !== "draft") return;
   const text = formatDraft(item.draft, item.costUsd);
-  const keyboard = draftKeyboard(itemId);
+  const keyboard = draftKeyboard(itemId, process.env.STUDIO_URL);
 
   if (item.draftMessageId === undefined && item.statusMessageId !== undefined) {
     await telegram.editMessageText(item.chatId, item.statusMessageId, text, keyboard);

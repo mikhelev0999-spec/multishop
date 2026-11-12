@@ -51,7 +51,10 @@ export function splitMessage(text: string, max = MAX_MESSAGE_LENGTH): string[] {
   return parts;
 }
 
-export function draftKeyboard(itemId: string): Keyboard {
+export function draftKeyboard(itemId: string, studioUrl?: string): Keyboard {
+  const studio: Keyboard = studioUrl
+    ? [[{ text: "🎨 Обработать фото", webAppUrl: `${studioUrl.replace(/\/+$/, "")}/studio?item=${itemId}` }]]
+    : [];
   return [
     [
       { text: "Выставить", callbackData: `publish:${itemId}` },
@@ -61,7 +64,15 @@ export function draftKeyboard(itemId: string): Keyboard {
       { text: "Изменить текст", callbackData: `text:${itemId}` },
       { text: "Отмена", callbackData: `cancel:${itemId}` },
     ],
+    ...studio,
   ];
+}
+
+export const MAX_LISTING_PHOTOS = 10;
+
+/** Listing order: processed photos first, then the originals; OLX and Telegram albums take 10. */
+export function listingPhotos<T>(studio: T[], originals: T[]): T[] {
+  return [...studio, ...originals].slice(0, MAX_LISTING_PHOTOS);
 }
 
 /** Ready to paste into an OLX listing (stage 1 has no automatic publishing). */

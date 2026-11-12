@@ -13,6 +13,7 @@ vi.mock("./lib/telegramApi", () => ({
   answerCallbackQuery: vi.fn(async () => {}),
   getFileBytes: vi.fn(),
   setWebhook: vi.fn(),
+  sendMediaGroup: vi.fn(async () => {}),
 }));
 vi.mock("./lib/agent", async (orig) => ({
   ...(await orig<typeof import("./lib/agent")>()),
@@ -82,7 +83,7 @@ test("a draft replaces the 'working' message and stores comparables", async () =
   expect(messageId).toBe(777);
   expect(text).toContain("📦 Чайник Bosch");
   expect(text).toContain("анализ: $0.09");
-  expect(keyboard?.[0][0].callbackData).toBe(`publish:${itemId}`);
+  expect((keyboard?.[0][0] as { callbackData: string }).callbackData).toBe(`publish:${itemId}`);
 
   const item = await t.run((ctx) => ctx.db.get(itemId));
   expect(item).toMatchObject({ status: "draft", draftMessageId: 777, costUsd: 0.09 });

@@ -1,9 +1,7 @@
 // The only place that talks to the Telegram Bot API. Mocked in tests.
 
-export interface Button {
-  text: string;
-  callbackData: string;
-}
+/** A callback button, or a button that opens a Mini App page. */
+export type Button = { text: string; callbackData: string } | { text: string; webAppUrl: string };
 export type Keyboard = Button[][];
 
 function token(): string {
@@ -31,7 +29,11 @@ async function call<T>(method: string, body: Record<string, unknown>): Promise<T
 
 const markup = (keyboard: Keyboard) => ({
   inline_keyboard: keyboard.map((row) =>
-    row.map((b) => ({ text: b.text, callback_data: b.callbackData })),
+    row.map((b) =>
+      "webAppUrl" in b
+        ? { text: b.text, web_app: { url: b.webAppUrl } }
+        : { text: b.text, callback_data: b.callbackData },
+    ),
   ),
 });
 
@@ -87,6 +89,17 @@ export async function getFileBytes(fileId: string): Promise<{ bytes: ArrayBuffer
   if (!res.ok) throw new Error(`Telegram file download failed: HTTP ${res.status}`);
   const ext = file_path.split(".").pop()?.toLowerCase() ?? "";
   return { bytes: await res.arrayBuffer(), mimeType: MIME_BY_EXT[ext] ?? "image/jpeg" };
+}
+
+/** Sends up to 10 photos (public URLs) as one album. */
+export async function sendMediaGroup(chatId: number, photoUrls: string[]): Promise<void> {
+  const media = photoUrls.slice(0, 10).map((url) => ({ type: "photo", media: url }));
+  if (media.length === 0) return;
+  if (media.length === 1) {
+    await call("sendPhoto", { chat_id: chatId, photo: media[0].media });
+    return;
+  }
+  await call("sendMediaGroup", { chat_id: chatId, media });
 }
 
 export async function setWebhook(url: string, secret: string): Promise<void> {

@@ -12,6 +12,7 @@ vi.mock("./lib/telegramApi", () => ({
   answerCallbackQuery: vi.fn(async () => {}),
   getFileBytes: vi.fn(async () => ({ bytes: new Uint8Array([1]).buffer, mimeType: "image/jpeg" })),
   setWebhook: vi.fn(),
+  sendMediaGroup: vi.fn(async () => {}),
 }));
 vi.mock("./lib/agent", async (orig) => ({
   ...(await orig<typeof import("./lib/agent")>()),
@@ -97,7 +98,7 @@ test("a submitted draft replaces the queue message", async () => {
   const [, messageId, text, keyboard] = vi.mocked(tg.editMessageText).mock.calls[0];
   expect(messageId).toBe(600);
   expect(text).toContain("разбор вручную");
-  expect(keyboard?.[0][0].callbackData).toBe(`publish:${item._id}`);
+  expect((keyboard?.[0][0] as { callbackData: string }).callbackData).toBe(`publish:${item._id}`);
 });
 
 test("an invalid draft is refused with the reason", async () => {
