@@ -1,8 +1,8 @@
 // Canvas pipeline: cut-out PNG → studio JPEG on a plain background. Runs in the browser only.
-import { alphaBounds, autoLevels, fitBox, sharpen } from "./imageOps";
+import { adjust, alphaBounds, autoLevels, fitBox, sharpen } from "./imageOps";
+import type { StudioSettings } from "./studioSettings";
 
 export const OUTPUT_SIZE = 1600;
-const PADDING = 0.08;
 const WORK_MAX = 1600;
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -14,8 +14,8 @@ function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContex
   return [c, ctx];
 }
 
-/** Places the cut-out item on a square canvas with a plain background and a soft shadow. */
-export async function composeOnBackground(cutout: Blob, background: string): Promise<Blob> {
+/** Places the cut-out item on a square canvas with a plain background, corrected as `settings` say. */
+export async function composeOnBackground(cutout: Blob, settings: StudioSettings): Promise<Blob> {
   const bitmap = await createImageBitmap(cutout);
   const scale = Math.min(1, WORK_MAX / Math.max(bitmap.width, bitmap.height));
   const w = Math.max(1, Math.round(bitmap.width * scale));
@@ -32,28 +32,40 @@ export async function composeOnBackground(cutout: Blob, background: string): Pro
   }
 
   const object = workCtx.getImageData(box.x, box.y, box.w, box.h);
-  autoLevels(object.data);
+  if (settings.auto) autoLevels(object.data);
+  adjust(object.data, settings);
+  const pixels =
+    settings.sharpness > 0
+      ? sharpen(object.data, box.w, box.h, settings.sharpness / 100)
+      : object.data;
   const [objCanvas, objCtx] = canvas(box.w, box.h);
-  objCtx.putImageData(new ImageData(sharpen(object.data, box.w, box.h, 0.3), box.w, box.h), 0, 0);
+  objCtx.putImageData(new ImageData(new Uint8ClampedArray(pixels), box.w, box.h), 0, 0);
 
   const [out, outCtx] = canvas(OUTPUT_SIZE, OUTPUT_SIZE);
   // iOS caps total canvas memory; release working canvases as soon as they are done.
-  const release = (...cs: HTMLCanvasElement[]) => cs.forEach((c) => ((c.width = 0), (c.height = 0)));
-  outCtx.fillStyle = background;
+  const release = (...cs: HTMLCanvasElement[]) =>
+    cs.forEach((c) => ((c.width = 0), (c.height = 0)));
+  outCtx.fillStyle = settings.background;
   outCtx.fillRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
-  const place = fitBox(box.w, box.h, OUTPUT_SIZE, PADDING);
-  outCtx.shadowColor = "rgba(0, 0, 0, 0.18)";
-  outCtx.shadowBlur = 30;
-  outCtx.shadowOffsetY = 12;
+  const place = fitBox(box.w, box.h, OUTPUT_SIZE, settings.padding / 100);
+  if (settings.shadow) {
+    outCtx.shadowColor = "rgba(0, 0, 0, 0.18)";
+    outCtx.shadowBlur = 30;
+    outCtx.shadowOffsetY = 12;
+  }
   outCtx.drawImage(objCanvas, place.x, place.y, place.w, place.h);
 
   release(work, objCanvas);
 
   return new Promise((resolve, reject) =>
-    out.toBlob((b) => {
-      release(out);
-      if (b) resolve(b);
-      else reject(new Error("Не удалось сохранить картинку"));
-    }, "image/jpeg", 0.9),
+    out.toBlob(
+      (b) => {
+        release(out);
+        if (b) resolve(b);
+        else reject(new Error("Не удалось сохранить картинку"));
+      },
+      "image/jpeg",
+      0.9,
+    ),
   );
 }

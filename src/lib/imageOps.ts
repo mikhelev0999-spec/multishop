@@ -60,6 +60,36 @@ export function sharpen(
   return out;
 }
 
+export interface Adjustments {
+  /** −50…50 */
+  brightness: number;
+  /** −50…50; +50 = 1.5× contrast */
+  contrast: number;
+  /** −50…50; −50 = half way to grey, +50 = 1.5× colour */
+  saturation: number;
+}
+
+/** Brightness, contrast and saturation in one pass; transparent pixels and alpha untouched. */
+export function adjust(data: Uint8ClampedArray, a: Adjustments): void {
+  if (a.brightness === 0 && a.contrast === 0 && a.saturation === 0) return;
+  const shift = (a.brightness / 50) * 64;
+  const contrast = 1 + a.contrast / 100;
+  const saturation = 1 + a.saturation / 100;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] === 0) continue;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    for (let c = 0; c < 3; c++) {
+      let v = data[i + c];
+      v = luma + (v - luma) * saturation;
+      v = (v - 128) * contrast + 128;
+      data[i + c] = Math.round(v + shift);
+    }
+  }
+}
+
 export interface Box {
   x: number;
   y: number;
@@ -68,7 +98,12 @@ export interface Box {
 }
 
 /** Bounding box of pixels with alpha above `threshold`, or null if there are none. */
-export function alphaBounds(data: Uint8ClampedArray, w: number, h: number, threshold = 10): Box | null {
+export function alphaBounds(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  threshold = 10,
+): Box | null {
   let minX = w;
   let minY = h;
   let maxX = -1;

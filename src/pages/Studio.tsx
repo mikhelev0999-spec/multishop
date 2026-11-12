@@ -4,6 +4,12 @@ import { useSearchParams } from "react-router";
 import { composeOnBackground } from "../lib/compose";
 import { removeBackground } from "../lib/removeBackground";
 import { loadItem, saveProcessed, type StudioItem } from "../lib/studioApi";
+import {
+  DEFAULT_SETTINGS,
+  loadSettings,
+  saveSettings,
+  type StudioSettings,
+} from "../lib/studioSettings";
 import { closeMiniApp, getInitData, startMiniApp } from "../lib/telegram";
 
 const BACKGROUNDS = [
@@ -13,7 +19,7 @@ const BACKGROUNDS = [
   { name: "Чёрный", color: "#111111" },
 ];
 const MAX_PHOTOS = 10;
-/** The colour picker fires on every move; recompose once it settles. */
+/** Sliders and the colour picker fire on every move; recompose once they settle. */
 const RECOMPOSE_DELAY_MS = 300;
 
 interface Result {
@@ -38,7 +44,7 @@ export default function Studio() {
   const [item, setItem] = useState<StudioItem | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set([0]));
   const [keep, setKeep] = useState<Set<string>>(new Set());
-  const [background, setBackground] = useState(BACKGROUNDS[0].color);
+  const [settings, setSettings] = useState<StudioSettings>(loadSettings);
   const [results, setResults] = useState<Result[]>([]);
   const [phase, setPhase] = useState<Phase>("loading");
   const [status, setStatus] = useState("");
@@ -47,12 +53,14 @@ export default function Studio() {
   // Latest values for async work, so a slow recompose never wins over a newer choice.
   const resultsRef = useRef<Result[]>([]);
   const generation = useRef(0);
-  const composedWith = useRef(BACKGROUNDS[0].color);
+  // Settings the current previews were made with.
+  const composedWith = useRef("");
 
   useEffect(() => {
     resultsRef.current = results;
   }, [results]);
   useEffect(() => () => revoke(resultsRef.current), []);
+  useEffect(() => saveSettings(settings), [settings]);
 
   useEffect(() => {
     if (!initData || !itemId) return;
@@ -66,15 +74,16 @@ export default function Studio() {
       .catch((e) => setError(message(e)));
   }, [initData, itemId]);
 
-  // Re-colour already processed photos when the background changes, reusing the cut-outs.
+  // Redo already processed photos when a setting changes, reusing the cut-outs (no model run).
   useEffect(() => {
-    if (phase !== "processed" || background === composedWith.current) return;
+    const key = JSON.stringify(settings);
+    if (phase !== "processed" || key === composedWith.current) return;
     const gen = ++generation.current;
     const timer = setTimeout(async () => {
       const made: Result[] = [];
       try {
         for (const r of resultsRef.current) {
-          const output = await composeOnBackground(r.cutout, background);
+          const output = await composeOnBackground(r.cutout, settings);
           made.push({ ...r, output, previewUrl: URL.createObjectURL(output) });
         }
       } catch (e) {
@@ -87,11 +96,13 @@ export default function Studio() {
         return;
       }
       revoke(resultsRef.current);
-      composedWith.current = background;
+      composedWith.current = key;
       setResults(made);
     }, RECOMPOSE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [background, phase]);
+  }, [settings, phase]);
+
+  const update = (patch: Partial<StudioSettings>) => setSettings((prev) => ({ ...prev, ...patch }));
 
   if (!initData || !itemId) {
     return (
@@ -130,15 +141,22 @@ export default function Studio() {
         const original = await res.blob();
         const cutout = await removeBackground(original, (done, total) => {
           if (total > 0 && done < total) {
-            setStatus(`Загружаю модель: ${Math.round((done / total) * 100)}% (только в первый раз)`);
+            setStatus(
+              `Загружаю модель: ${Math.round((done / total) * 100)}% (только в первый раз)`,
+            );
           }
         });
         setStatus(`Фото ${n + 1} из ${chosen.length}: собираю…`);
-        const output = await composeOnBackground(cutout, background);
-        out.push({ originalUrl: photo.url, cutout, output, previewUrl: URL.createObjectURL(output) });
+        const output = await composeOnBackground(cutout, settings);
+        out.push({
+          originalUrl: photo.url,
+          cutout,
+          output,
+          previewUrl: URL.createObjectURL(output),
+        });
       }
       revoke(resultsRef.current);
-      composedWith.current = background;
+      composedWith.current = JSON.stringify(settings);
       setResults(out);
       setPhase("processed");
     } catch (e) {
@@ -190,9 +208,9 @@ export default function Studio() {
                 key={b.color}
                 type="button"
                 disabled={busy}
-                aria-pressed={background === b.color}
-                onClick={() => setBackground(b.color)}
-                className={`rounded border px-3 py-1 text-sm ${background === b.color ? "ring-2 ring-blue-500" : ""}`}
+                aria-pressed={settings.background === b.color}
+                onClick={() => update({ background: b.color })}
+                className={`rounded border px-3 py-1 text-sm ${settings.background === b.color ? "ring-2 ring-blue-500" : ""}`}
               >
                 <span
                   className="mr-1 inline-block h-3 w-3 rounded-full border align-middle"
@@ -205,12 +223,86 @@ export default function Studio() {
               Свой
               <input
                 type="color"
-                value={background}
+                value={settings.background}
                 disabled={busy}
-                onChange={(e) => setBackground(e.target.value)}
+                onChange={(e) => update({ background: e.target.value })}
               />
             </label>
           </section>
+
+          <details className="rounded border p-3">
+            <summary className="cursor-pointer font-medium">Настройки качества</summary>
+            <div className="mt-3 space-y-3 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.auto}
+                  disabled={busy}
+                  onChange={(e) => update({ auto: e.target.checked })}
+                />
+                Авто-коррекция света и цвета
+              </label>
+              <Slider
+                label="Резкость"
+                value={settings.sharpness}
+                min={0}
+                max={100}
+                disabled={busy}
+                onChange={(v) => update({ sharpness: v })}
+              />
+              <Slider
+                label="Яркость"
+                value={settings.brightness}
+                min={-50}
+                max={50}
+                disabled={busy}
+                onChange={(v) => update({ brightness: v })}
+              />
+              <Slider
+                label="Контраст"
+                value={settings.contrast}
+                min={-50}
+                max={50}
+                disabled={busy}
+                onChange={(v) => update({ contrast: v })}
+              />
+              <Slider
+                label="Насыщенность"
+                value={settings.saturation}
+                min={-50}
+                max={50}
+                disabled={busy}
+                onChange={(v) => update({ saturation: v })}
+              />
+              <Slider
+                label="Поля вокруг вещи, %"
+                value={settings.padding}
+                min={0}
+                max={20}
+                disabled={busy}
+                onChange={(v) => update({ padding: v })}
+              />
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.shadow}
+                  disabled={busy}
+                  onChange={(e) => update({ shadow: e.target.checked })}
+                />
+                Тень под вещью
+              </label>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  setSettings({ ...DEFAULT_SETTINGS, background: settings.background })
+                }
+                className="rounded border px-3 py-1"
+              >
+                Сбросить настройки
+              </button>
+            </div>
+          </details>
 
           {item.studio.length > 0 && (
             <section aria-label="Уже обработаны">
@@ -264,8 +356,8 @@ export default function Studio() {
                 ))}
               </ul>
               <p className="text-sm text-gray-500">
-                Первый раз телефон скачает модель (~40 МБ) — это может занять минуту. Фото не покидают
-                телефон, пока вы не нажмёте «Сохранить».
+                Первый раз телефон скачает модель (~40 МБ) — это может занять минуту. Фото не
+                покидают телефон, пока вы не нажмёте «Сохранить».
               </p>
               <button
                 type="button"
@@ -300,8 +392,8 @@ export default function Studio() {
               </ul>
               {total > MAX_PHOTOS && (
                 <p className="text-sm text-red-700">
-                  Всего обработанных фото будет {total}, а можно не больше {MAX_PHOTOS} — снимите галочки у
-                  старых.
+                  Всего обработанных фото будет {total}, а можно не больше {MAX_PHOTOS} — снимите
+                  галочки у старых.
                 </p>
               )}
               {phase === "saved" ? (
@@ -332,6 +424,33 @@ export default function Studio() {
       )}
       {!item && !error && <p>Загружаю…</p>}
     </Shell>
+  );
+}
+
+function Slider(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="flex justify-between">
+        <span>{props.label}</span>
+        <span>{props.value}</span>
+      </span>
+      <input
+        type="range"
+        className="w-full"
+        min={props.min}
+        max={props.max}
+        value={props.value}
+        disabled={props.disabled}
+        onChange={(e) => props.onChange(Number(e.target.value))}
+      />
+    </label>
   );
 }
 

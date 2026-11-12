@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { alphaBounds, autoLevels, fitBox, sharpen } from "./imageOps";
+import { adjust, alphaBounds, autoLevels, fitBox, sharpen } from "./imageOps";
 
 /** w×h RGBA pixels from [r, g, b, a] tuples. */
 const pixels = (list: number[][]) => new Uint8ClampedArray(list.flat());
@@ -77,5 +77,36 @@ describe("fitBox", () => {
 
   test("a wide object fills the width", () => {
     expect(fitBox(800, 200, 1000, 0.1)).toEqual({ x: 100, y: 400, w: 800, h: 200 });
+  });
+});
+
+describe("adjust", () => {
+  const px = () => pixels([[100, 150, 200, 255], [0, 0, 0, 0]]);
+
+  test("all zeros change nothing", () => {
+    const data = px();
+    adjust(data, { brightness: 0, contrast: 0, saturation: 0 });
+    expect([...data]).toEqual([...px()]);
+  });
+
+  test("brightness lifts every channel, transparent pixels untouched", () => {
+    const data = px();
+    adjust(data, { brightness: 25, contrast: 0, saturation: 0 });
+    expect([...data.slice(0, 3)]).toEqual([132, 182, 232]);
+    expect([...data.slice(4)]).toEqual([0, 0, 0, 0]);
+  });
+
+  test("contrast pushes away from mid-grey", () => {
+    const data = px();
+    adjust(data, { brightness: 0, contrast: 50, saturation: 0 });
+    // (v - 128) × 1.5 + 128
+    expect([...data.slice(0, 3)]).toEqual([86, 161, 236]);
+  });
+
+  test("saturation -50 halves the distance to grey, -100 would be grey", () => {
+    const data = pixels([[200, 100, 100, 255]]);
+    adjust(data, { brightness: 0, contrast: 0, saturation: -50 });
+    // luma = 0.299*200 + 0.587*100 + 0.114*100 = 129.9
+    expect([...data.slice(0, 3)]).toEqual([165, 115, 115]);
   });
 });

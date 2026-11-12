@@ -29,11 +29,19 @@ const item = {
 
 beforeEach(() => {
   vi.mocked(loadItem).mockResolvedValue(item);
-  vi.mocked(removeBackground).mockImplementation(async (b) => new Blob(["cut:", b], { type: "image/png" }));
-  vi.mocked(composeOnBackground).mockImplementation(async (_b, bg) => new Blob([bg], { type: "image/jpeg" }));
+  vi.mocked(removeBackground).mockImplementation(
+    async (b) => new Blob(["cut:", b], { type: "image/png" }),
+  );
+  vi.mocked(composeOnBackground).mockImplementation(
+    async (_b, settings) => new Blob([settings.background], { type: "image/jpeg" }),
+  );
+  localStorage.clear();
   vi.mocked(saveProcessed).mockResolvedValue();
   // jsdom Blobs have no stream(), so new Response(blob) fails there.
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ blob: async () => new Blob([url]) })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => ({ blob: async () => new Blob([url]) })),
+  );
   URL.createObjectURL = vi.fn(() => "blob:preview");
   URL.revokeObjectURL = vi.fn();
 });
@@ -60,7 +68,7 @@ test("shows the item and its photos, the first one selected", async () => {
   renderStudio();
   expect(await screen.findByText("Чоботи Chloé Betty")).toBeInTheDocument();
   expect(loadItem).toHaveBeenCalledWith("signed", "item1");
-  const boxes = screen.getAllByRole("checkbox");
+  const boxes = screen.getAllByRole("checkbox", { name: /Обработать фото/ });
   expect(boxes).toHaveLength(2);
   expect(boxes[0]).toBeChecked();
   expect(boxes[1]).not.toBeChecked();
@@ -70,13 +78,16 @@ test("processes the selected photos on the chosen background and saves them", as
   const user = userEvent.setup();
   renderStudio();
   await screen.findByText("Чоботи Chloé Betty");
-  await user.click(screen.getAllByRole("checkbox")[1]);
+  await user.click(screen.getAllByRole("checkbox", { name: /Обработать фото/ })[1]);
   await user.click(screen.getByRole("button", { name: "Бежевый" }));
   await user.click(screen.getByRole("button", { name: "Обработать" }));
 
   await screen.findByRole("button", { name: "Сохранить" });
   expect(removeBackground).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(composeOnBackground).mock.calls.map((c) => c[1])).toEqual(["#efe6da", "#efe6da"]);
+  expect(vi.mocked(composeOnBackground).mock.calls.map((c) => c[1].background)).toEqual([
+    "#efe6da",
+    "#efe6da",
+  ]);
 
   await user.click(screen.getByRole("button", { name: "Сохранить" }));
   await waitFor(() => expect(saveProcessed).toHaveBeenCalled());
@@ -92,7 +103,12 @@ test("changing the background after processing reuses the cut-outs", async () =>
   await user.click(screen.getByRole("button", { name: "Обработать" }));
   await screen.findByRole("button", { name: "Сохранить" });
   await user.click(screen.getByRole("button", { name: "Чёрный" }));
-  await waitFor(() => expect(composeOnBackground).toHaveBeenLastCalledWith(expect.any(Blob), "#111111"));
+  await waitFor(() =>
+    expect(composeOnBackground).toHaveBeenLastCalledWith(
+      expect.any(Blob),
+      expect.objectContaining({ background: "#111111" }),
+    ),
+  );
   expect(removeBackground).toHaveBeenCalledTimes(1);
 });
 
@@ -133,7 +149,10 @@ test("more than 10 processed photos in total blocks saving", async () => {
   const user = userEvent.setup();
   vi.mocked(loadItem).mockResolvedValueOnce({
     ...item,
-    studio: Array.from({ length: 10 }, (_, i) => ({ storageId: `p${i}`, url: `https://cdn/p${i}.jpg` })),
+    studio: Array.from({ length: 10 }, (_, i) => ({
+      storageId: `p${i}`,
+      url: `https://cdn/p${i}.jpg`,
+    })),
   });
   renderStudio();
   await screen.findByText(/Уже обработаны/);
@@ -144,7 +163,52 @@ test("more than 10 processed photos in total blocks saving", async () => {
 
 test("a server error shows only its message for the owner", async () => {
   const { ConvexError } = await import("convex/values");
-  vi.mocked(loadItem).mockRejectedValueOnce(new ConvexError("Студия доступна только владельцу бота"));
+  vi.mocked(loadItem).mockRejectedValueOnce(
+    new ConvexError("Студия доступна только владельцу бота"),
+  );
   renderStudio();
-  expect(await screen.findByRole("alert")).toHaveTextContent(/^Студия доступна только владельцу бота$/);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    /^Студия доступна только владельцу бота$/,
+  );
+});
+
+test("quality settings: defaults are automatic, sliders redo the preview and are remembered", async () => {
+  const user = userEvent.setup();
+  const { fireEvent } = await import("@testing-library/react");
+  renderStudio();
+  await screen.findByText("Чоботи Chloé Betty");
+  await user.click(screen.getByRole("button", { name: "Обработать" }));
+  await screen.findByRole("button", { name: "Сохранить" });
+  expect(vi.mocked(composeOnBackground).mock.calls[0][1]).toMatchObject({
+    auto: true,
+    sharpness: 30,
+    shadow: true,
+  });
+
+  await user.click(screen.getByText("Настройки качества"));
+  fireEvent.change(screen.getByRole("slider", { name: /Резкость/ }), { target: { value: "70" } });
+  await user.click(screen.getByRole("checkbox", { name: "Тень под вещью" }));
+  await waitFor(() =>
+    expect(composeOnBackground).toHaveBeenLastCalledWith(
+      expect.any(Blob),
+      expect.objectContaining({ sharpness: 70, shadow: false }),
+    ),
+  );
+  expect(removeBackground).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(localStorage.getItem("multishop.studio.settings")!)).toMatchObject({
+    sharpness: 70,
+    shadow: false,
+  });
+});
+
+test("reset brings the settings back to automatic defaults", async () => {
+  const user = userEvent.setup();
+  localStorage.setItem("multishop.studio.settings", JSON.stringify({ sharpness: 90, auto: false }));
+  renderStudio();
+  await screen.findByText("Чоботи Chloé Betty");
+  await user.click(screen.getByText("Настройки качества"));
+  expect(screen.getByRole("checkbox", { name: /Авто-коррекция/ })).not.toBeChecked();
+  await user.click(screen.getByRole("button", { name: "Сбросить настройки" }));
+  expect(screen.getByRole("checkbox", { name: /Авто-коррекция/ })).toBeChecked();
+  expect(screen.getByRole("slider", { name: /Резкость/ })).toHaveValue("30");
 });
