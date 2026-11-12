@@ -73,3 +73,15 @@ npx convex run manual:ask '{"itemId": "...", "question": "..."}'
 
 Тот же `submitDraft` выполняет запросы «Изменить текст» из `queue.rewrite`; цена при этом
 не меняется. Как только `ANTHROPIC_API_KEY` добавлен, бот разбирает фото сам.
+
+## Фотостудия (мини-приложение Telegram)
+
+Страница `/studio` убирает фон с фото прямо на телефоне (открытая модель
+`@imgly/background-removal`, лицензия AGPL — для личного использования владельцем это
+не ограничение) и сохраняет результат в Convex.
+
+1. Разместить сайт на Vercel: vercel.com → Add New → Project → импортировать репозиторий
+   `multishop`, в Environment Variables добавить `VITE_CONVEX_URL` (адрес из `.env.local`,
+   `https://…convex.cloud`) и нажать Deploy.
+2. Адрес сайта (`https://….vercel.app`) записать в Convex переменной `STUDIO_URL`.
+3. Под новыми черновиками в боте появится кнопка «🎨 Обработать фото».
