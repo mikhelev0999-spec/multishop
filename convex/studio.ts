@@ -1,5 +1,5 @@
 // Photo studio Mini App backend. Every function checks Telegram's signed initData first.
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { action, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
@@ -16,19 +16,19 @@ const UPLOAD_MAX_AGE_MS = 60 * 60 * 1000;
 async function requireOwner(initData: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const owner = Number(process.env.OWNER_TELEGRAM_ID);
-  if (!token || !owner) throw new Error("Бот не настроен");
-  const { userId } = await verifyInitData(
-    initData,
-    token,
-    Math.floor(Date.now() / 1000),
-    STUDIO_INIT_DATA_MAX_AGE_SEC,
-  );
-  if (userId !== owner) throw new Error("Студия доступна только владельцу бота");
+  if (!token || !owner) throw new ConvexError("Бот не настроен");
+  let userId: number;
+  try {
+    ({ userId } = await verifyInitData(initData, token, Math.floor(Date.now() / 1000), STUDIO_INIT_DATA_MAX_AGE_SEC));
+  } catch {
+    throw new ConvexError("Не удалось проверить вход через Telegram — откройте студию заново из бота");
+  }
+  if (userId !== owner) throw new ConvexError("Студия доступна только владельцу бота");
 }
 
 async function draftItem(ctx: ActionCtx, itemId: Id<"items">): Promise<Doc<"items">> {
   const it: Doc<"items"> | null = await ctx.runQuery(internal.studio.item, { itemId });
-  if (!it || it.status !== "draft") throw new Error("Обработать можно только черновик");
+  if (!it || it.status !== "draft") throw new ConvexError("Обработать можно только черновик");
   return it;
 }
 
@@ -69,7 +69,7 @@ export const uploadUrls = action({
     await requireOwner(initData);
     await draftItem(ctx, itemId);
     if (!Number.isInteger(count) || count < 1 || count > MAX_LISTING_PHOTOS) {
-      throw new Error(`Можно загрузить от 1 до ${MAX_LISTING_PHOTOS} фото`);
+      throw new ConvexError(`Можно загрузить от 1 до ${MAX_LISTING_PHOTOS} фото`);
     }
     // Files uploaded but never saved have no owner and are pruned by files.pruneOrphans.
     const urls: string[] = [];
@@ -112,7 +112,7 @@ export const save = action({
     await requireOwner(initData);
     await draftItem(ctx, itemId);
     if (storageIds.length === 0 || storageIds.length > MAX_LISTING_PHOTOS || new Set(storageIds).size !== storageIds.length) {
-      throw new Error(`Нужно от 1 до ${MAX_LISTING_PHOTOS} разных фото`);
+      throw new ConvexError(`Нужно от 1 до ${MAX_LISTING_PHOTOS} разных фото`);
     }
 
     const fresh: Id<"_storage">[] = [];
@@ -144,7 +144,7 @@ export const save = action({
       }
     }
     for (const id of fresh) await ctx.storage.delete(id).catch(() => {});
-    throw new Error(`Не сохранено: ${problem}`);
+    throw new ConvexError(`Не сохранено: ${problem}`);
   },
 });
 
@@ -153,7 +153,7 @@ export const attach = internalMutation({
   returns: v.null(),
   handler: async (ctx, { itemId, storageIds }) => {
     const it = await ctx.db.get(itemId);
-    if (!it || it.status !== "draft") throw new Error("черновик уже обработан");
+    if (!it || it.status !== "draft") throw new ConvexError("черновик уже обработан");
     for (const id of storageIds) await claimFile(ctx, id, itemId, "studio");
     for (const old of it.studioPhotoIds ?? []) {
       if (!storageIds.includes(old)) await deleteFile(ctx, old);

@@ -47,6 +47,13 @@ export default defineSchema({
     itemId: v.id("items"),
     kind: v.union(v.literal("photo"), v.literal("studio")),
   }).index("by_storage", ["storageId"]),
+  staticFiles: defineTable({
+    path: v.string(),
+    storageId: v.id("_storage"),
+    contentType: v.string(),
+  })
+    .index("by_path", ["path"])
+    .index("by_storage", ["storageId"]),
   telegramUpdates: defineTable({ updateId: v.number() }).index("by_update_id", ["updateId"]),
   fxRates: defineTable({ date: v.string(), usdUah: v.number() }).index("by_date", ["date"]),
 });

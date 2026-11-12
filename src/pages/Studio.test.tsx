@@ -141,3 +141,10 @@ test("more than 10 processed photos in total blocks saving", async () => {
   expect(await screen.findByRole("button", { name: "Сохранить" })).toBeDisabled();
   expect(screen.getByText(/можно не больше 10/)).toBeInTheDocument();
 });
+
+test("a server error shows only its message for the owner", async () => {
+  const { ConvexError } = await import("convex/values");
+  vi.mocked(loadItem).mockRejectedValueOnce(new ConvexError("Студия доступна только владельцу бота"));
+  renderStudio();
+  expect(await screen.findByRole("alert")).toHaveTextContent(/^Студия доступна только владельцу бота$/);
+});

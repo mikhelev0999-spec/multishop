@@ -31,6 +31,7 @@ import type * as lib_telegramUpdate from "../lib/telegramUpdate.js";
 import type * as lib_validators from "../lib/validators.js";
 import type * as lib_webAppAuth from "../lib/webAppAuth.js";
 import type * as manual from "../manual.js";
+import type * as site from "../site.js";
 import type * as studio from "../studio.js";
 import type * as telegram from "../telegram.js";
 
@@ -64,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   "lib/validators": typeof lib_validators;
   "lib/webAppAuth": typeof lib_webAppAuth;
   manual: typeof manual;
+  site: typeof site;
   studio: typeof studio;
   telegram: typeof telegram;
 }>;

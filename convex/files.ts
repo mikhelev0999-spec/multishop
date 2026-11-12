@@ -20,7 +20,12 @@ export const pruneOrphans = internalMutation({
       )
       .take(BATCH);
     for (const file of files) {
-      if (!(await ownerOf(ctx, file._id))) await ctx.storage.delete(file._id);
+      if (await ownerOf(ctx, file._id)) continue;
+      const siteFile = await ctx.db
+        .query("staticFiles")
+        .withIndex("by_storage", (q) => q.eq("storageId", file._id))
+        .first();
+      if (!siteFile) await ctx.storage.delete(file._id);
     }
     return null;
   },

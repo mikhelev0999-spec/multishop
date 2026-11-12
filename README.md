@@ -80,8 +80,10 @@ npx convex run manual:ask '{"itemId": "...", "question": "..."}'
 `@imgly/background-removal`, лицензия AGPL — для личного использования владельцем это
 не ограничение) и сохраняет результат в Convex.
 
-1. Разместить сайт на Vercel: vercel.com → Add New → Project → импортировать репозиторий
-   `multishop`, в Environment Variables добавить `VITE_CONVEX_URL` (адрес из `.env.local`,
-   `https://…convex.cloud`) и нажать Deploy.
-2. Адрес сайта (`https://….vercel.app`) записать в Convex переменной `STUDIO_URL`.
+Страница раздаётся самим Convex: `https://<deployment>.convex.site/studio`.
+
+1. Опубликовать (после любых изменений в `src/`): `./scripts/publish-studio.sh`.
+2. Один раз: в Convex переменная `STUDIO_URL` = `https://<deployment>.convex.site`.
 3. Под новыми черновиками в боте появится кнопка «🎨 Обработать фото».
+
+Vercel не обязателен; если сайт переедет туда, достаточно сменить `STUDIO_URL`.

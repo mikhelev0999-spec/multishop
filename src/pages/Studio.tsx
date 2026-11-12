@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ConvexError } from "convex/values";
 import { useSearchParams } from "react-router";
 import { composeOnBackground } from "../lib/compose";
 import { removeBackground } from "../lib/removeBackground";
@@ -24,7 +25,9 @@ interface Result {
 
 type Phase = "loading" | "ready" | "working" | "processed" | "saving" | "saved";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+// Server errors meant for the owner come as ConvexError data; anything else is shown as is.
+const message = (e: unknown) =>
+  e instanceof ConvexError ? String(e.data) : e instanceof Error ? e.message : String(e);
 const revoke = (results: Result[]) => results.forEach((r) => URL.revokeObjectURL(r.previewUrl));
 
 export default function Studio() {
